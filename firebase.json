@@ -1,0 +1,14 @@
+{
+  "hosting": {
+    "site": "hasr-alqawaed-preview",
+    "public": "build/web",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "headers": [
+      {
+        "source": "**",
+        "headers": [{"key": "Cache-Control", "value": "public, max-age=0, must-revalidate"}]
+      }
+    ],
+    "rewrites": [{"source": "**", "destination": "/index.html"}]
+  }
+}

@@ -1,0 +1,6 @@
+* text=auto eol=lf
+*.png binary
+*.ttf binary
+*.pdf binary
+# Preserve the upstream font license verbatim.
+assets/fonts/OFL.txt -whitespace

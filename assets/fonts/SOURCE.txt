@@ -1,0 +1,9 @@
+Cairo font source: https://github.com/google/fonts/tree/main/ofl/cairo
+Downloaded from the official Google Fonts repository:
+https://raw.githubusercontent.com/google/fonts/main/ofl/cairo/Cairo%5Bslnt%2Cwght%5D.ttf
+https://raw.githubusercontent.com/google/fonts/main/ofl/cairo/OFL.txt
+
+Cairo-Regular.ttf and Cairo-Bold.ttf are static instances of this upstream
+variable font, instantiated using fontTools at wght=400/700 and slnt=0.
+The original Cairo-Variable.ttf and SIL Open Font License are retained.
+Both static fonts are embedded locally in the app and PDF; no runtime downloads.

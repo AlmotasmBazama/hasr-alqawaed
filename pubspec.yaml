@@ -1,0 +1,38 @@
+name: hasr_alqawaed
+description: حاسبة عربية محلية لكميات وتكاليف القواعد الهندسية.
+publish_to: none
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.5
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  shared_preferences: ^2.5.6
+  pdf: ^3.12.0
+  printing: ^5.14.3
+  # image 4.11 uses archive APIs unavailable under the Flutter 3.41 SDK pins.
+  image: 4.9.2
+  web: ^1.1.1
+  cupertino_icons: ^1.0.9
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  integration_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/fonts/OFL.txt
+  fonts:
+    - family: Cairo
+      fonts:
+        - asset: assets/fonts/Cairo-Regular.ttf
+        - asset: assets/fonts/Cairo-Bold.ttf
+          weight: 700

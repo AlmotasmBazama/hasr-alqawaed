@@ -1,0 +1,14 @@
+{
+  "name": "حصر القواعد",
+  "short_name": "حصر القواعد",
+  "lang": "ar",
+  "dir": "rtl",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "background_color": "#F6F7F5",
+  "theme_color": "#246B57",
+  "description": "حاسبة كميات وتكلفة القواعد مع حفظ محلي وتقرير PDF.",
+  "prefer_related_applications": false,
+  "icons": [{"src":"icon.svg","sizes":"any","type":"image/svg+xml","purpose":"any"}]
+}
