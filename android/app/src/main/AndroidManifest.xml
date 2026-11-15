@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application
-        android:label="حصر القواعد"
+        android:label="حصر المشروع"
         android:supportsRtl="true"
         android:name="${applicationName}"
         android:icon="@drawable/ic_launcher">

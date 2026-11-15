@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hasr_alqawaed/data/app_repository.dart';
 import 'package:hasr_alqawaed/domain/models.dart';
-import 'package:hasr_alqawaed/main.dart';
+import 'support/legacy_app.dart';
 import 'package:hasr_alqawaed/ui/model_editor.dart';
 
 class _ControlledStore implements KeyValueStore {
@@ -37,7 +37,7 @@ class _ControlledStore implements KeyValueStore {
 }
 
 Future<void> _openEditor(WidgetTester tester, AppRepository repository) async {
-  await tester.pumpWidget(HasrApp(repository: repository));
+  await tester.pumpWidget(LegacyHasrApp(repository: repository));
   await tester.pumpAndSettle();
   await tester.tap(find.byKey(const ValueKey('add_model')));
   await tester.pumpAndSettle();
@@ -127,7 +127,7 @@ void main() {
     (tester) async {
       final store = _ControlledStore()..failRead = true;
       final repository = AppRepository(store: store);
-      await tester.pumpWidget(HasrApp(repository: repository));
+      await tester.pumpWidget(LegacyHasrApp(repository: repository));
       await tester.pumpAndSettle();
       const warning =
           'تعذّرت قراءة البيانات المحفوظة. أعد فتح التطبيق للمحاولة؛ الحفظ متوقف لحماية بياناتك.';

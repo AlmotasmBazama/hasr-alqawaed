@@ -1,171 +1,169 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-
 import 'package:hasr_alqawaed/data/app_repository.dart';
+import 'package:hasr_alqawaed/domain/calculator.dart' as old_engine;
+import 'package:hasr_alqawaed/domain/models.dart' as legacy;
 import 'package:hasr_alqawaed/main.dart';
+import 'package:hasr_alqawaed/project/engine.dart';
+import 'package:hasr_alqawaed/project/models.dart';
+import 'package:hasr_alqawaed/project/repository.dart';
+import 'package:hasr_alqawaed/services/project_report_service.dart';
 
-/// Real native preferences, isolated from the installed application's data.
-class _IntegrationStore implements KeyValueStore {
+/// Native storage remains isolated from the application's own saved projects.
+class NativeTestStore implements KeyValueStore {
   final preferences = SharedPreferencesAsync();
-  static const prefix = 'hasr_integration_';
-
+  static const prefix = 'hasr_v2_integration_';
+  static const keys = [
+    AppRepository.storageKey,
+    ProjectRepository.storageKey,
+    ProjectRepository.legacyBackupKey,
+    ProjectRepository.migrationMarkerKey,
+    ProjectRepository.recoveryKey,
+  ];
   @override
   Future<String?> read(String key) => preferences.getString('$prefix$key');
-
   @override
   Future<void> write(String key, String value) =>
       preferences.setString('$prefix$key', value);
-
   Future<void> clear() async {
-    await preferences.remove('$prefix${AppRepository.storageKey}');
-    await preferences.remove('$prefix${AppRepository.recoveryKey}');
+    for (final key in keys) {
+      await preferences.remove('$prefix$key');
+    }
   }
 }
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
-
-  testWidgets('native model lifecycle, Arabic input and persistent calculator', (
-    tester,
-  ) async {
-    final store = _IntegrationStore();
-    await store.clear();
-    final repository = AppRepository(store: store);
-
-    Future<void> settle() async {
-      await tester.pumpAndSettle(const Duration(milliseconds: 100));
-    }
-
-    Future<void> reveal(Finder finder, {double delta = 260}) async {
-      if (finder.evaluate().isEmpty) {
-        await tester.scrollUntilVisible(
-          finder,
-          delta,
-          scrollable: find
-              .descendant(
-                of: find.byType(ListView).last,
-                matching: find.byType(Scrollable),
-              )
-              .first,
-          maxScrolls: 35,
-        );
-      } else {
-        await tester.ensureVisible(finder);
-      }
-      await settle();
-    }
-
-    Future<void> tap(Finder finder, {double delta = 260}) async {
-      await reveal(finder, delta: delta);
-      await tester.tap(finder);
-      await settle();
-    }
-
-    Future<void> enter(String key, String value) async {
-      final field = find.byKey(ValueKey(key));
-      await reveal(field);
-      await tester.enterText(field, value);
-      await settle();
-    }
-
-    Future<void> hideKeyboard() async {
-      FocusManager.instance.primaryFocus?.unfocus();
-      await SystemChannels.textInput.invokeMethod<void>('TextInput.hide');
-      await settle();
-    }
-
-    try {
-      await tester.pumpWidget(HasrApp(repository: repository));
-      await settle();
-      expect(find.text('حصر القواعد'), findsOneWidget);
-      await reveal(find.textContaining('17,800'));
-      expect(find.textContaining('17,800'), findsOneWidget);
-
-      await reveal(find.byKey(const ValueKey('count')), delta: -260);
-      await enter('count', '١٠');
-      await hideKeyboard();
-      await tap(find.byKey(const ValueKey('add_model')), delta: -260);
-      await enter('model_name', 'نموذج الاختبار');
-      const values = <int, String>{4: '١', 5: '٢', 6: '٥', 7: '٠٫٥', 8: '١٠'};
-      for (final entry in values.entries) {
-        await enter('model_field_${entry.key}', entry.value);
-      }
-      await hideKeyboard();
-      await tap(find.text('حفظ واستخدام النموذج'));
-      await reveal(find.textContaining('9,580'));
-      expect(find.textContaining('9,580'), findsOneWidget);
-
-      await repository.flush();
-      var saved = (await AppRepository(store: store).load()).data;
-      expect(saved.customModels, hasLength(1));
-      final modelId = saved.customModels.single.id;
-      expect(saved.selectedModelId, modelId);
-      expect(saved.inputs.count, 10);
-      expect(saved.selectedModel.steel8BarsPerFoundation, 0.5);
-
-      await reveal(find.byKey(const ValueKey('price_0')), delta: -260);
-      await enter('price_0', '600');
-      await hideKeyboard();
-      await tester.pump(const Duration(milliseconds: 700));
-      await repository.flush();
-
-      await tap(find.byKey(const ValueKey('choose_model')), delta: -260);
-      await tap(find.byKey(ValueKey('edit_model_$modelId')));
-      await enter('model_name', 'نموذج معدل');
-      await hideKeyboard();
-      await tap(find.text('حفظ التعديلات'));
-      await repository.flush();
-      saved = (await AppRepository(store: store).load()).data;
-      expect(saved.customModels, hasLength(1));
-      expect(saved.customModels.single.id, modelId);
-      expect(saved.customModels.single.name, 'نموذج معدل');
-
-      await tap(find.byKey(const ValueKey('choose_model')), delta: -260);
-      await tap(find.byKey(ValueKey('edit_model_$modelId')));
-      await enter('model_name', 'تعديل ملغى');
-      await hideKeyboard();
-      await tester.tap(find.byType(BackButton));
-      await settle();
-      expect(
-        (await AppRepository(
-          store: store,
-        ).load()).data.customModels.single.name,
-        'نموذج معدل',
-      );
-
-      await tap(find.byKey(const ValueKey('choose_model')), delta: -260);
-      await tap(find.text('نموذج 1').last);
-      await repository.flush();
-      saved = (await AppRepository(store: store).load()).data;
-      expect(saved.selectedModel.isBuiltIn, isTrue);
-      expect(saved.inputs.count, 10);
-      expect(saved.inputs.prices.concrete, 600);
-
-      // Dispose the entire UI and create another repository to read native data.
-      await tester.pumpWidget(const SizedBox.shrink());
-      await settle();
-      await tester.pumpWidget(HasrApp(repository: AppRepository(store: store)));
-      await settle();
-      final count = tester.widget<TextField>(
-        find.byKey(const ValueKey('count')),
-      );
-      expect(count.controller!.text, '10');
-      await reveal(find.byKey(const ValueKey('price_0')));
-      final price = tester.widget<TextField>(
-        find.byKey(const ValueKey('price_0')),
-      );
-      expect(double.parse(price.controller!.text), 600);
-      await reveal(find.textContaining('9,200'));
-      expect(find.textContaining('9,200'), findsOneWidget);
-      expect(tester.takeException(), isNull);
-    } finally {
-      await tester.pumpWidget(const SizedBox.shrink());
-      await settle();
-      await repository.flush();
+  testWidgets(
+    'native migration, example prices, independent projects and PDF',
+    (tester) async {
+      final store = NativeTestStore();
       await store.clear();
-    }
-  });
+      final custom = legacy.FoundationModel.builtIn.copyWith(
+        id: 'native-custom',
+        name: 'نموذج محفوظ',
+        concretePerFoundation: .9,
+        steel14BarsPerFoundation: 2.5,
+        steel14BarsPerQuintal: 5.5,
+        steel8BarsPerFoundation: .75,
+        steel8BarsPerQuintal: 18.5,
+      );
+      final old = legacy.AppData(
+        customModels: [custom],
+        selectedModelId: custom.id,
+        inputs: legacy.CalculatorInputs(
+          count: 12,
+          prices: legacy.Prices.defaults.copyWith(
+            concrete: 615,
+            steel14: 533,
+            carpenter: 77,
+          ),
+        ),
+      );
+      final raw = jsonEncode(old.toJson());
+      await store.write(AppRepository.storageKey, raw);
+      var repository = ProjectRepository(store: store);
+      Future<void> settle() =>
+          tester.pumpAndSettle(const Duration(milliseconds: 100));
+      Future<void> hideKeyboard() async {
+        FocusManager.instance.primaryFocus?.unfocus();
+        await SystemChannels.textInput.invokeMethod<void>('TextInput.hide');
+        await settle();
+      }
+
+      Future<void> tapKey(String key) async {
+        final finder = find.byKey(ValueKey(key));
+        await tester.ensureVisible(finder);
+        await tester.tap(finder);
+        await settle();
+      }
+
+      Future<void> enter(String key, String value) async {
+        final container = find.byKey(ValueKey(key));
+        await tester.ensureVisible(container);
+        final field = find.descendant(
+          of: container,
+          matching: find.byType(TextField),
+        );
+        await tester.enterText(field, value);
+        await tester.pump(const Duration(milliseconds: 600));
+        await hideKeyboard();
+      }
+
+      try {
+        await tester.pumpWidget(HasrApp(repository: repository));
+        await settle();
+        expect(find.text('مشروعي السابق'), findsOneWidget);
+        var saved = (await ProjectRepository(store: store).load()).data;
+        expect(saved.projects, hasLength(1));
+        expect(saved.customModels.single.id, custom.id);
+        expect(saved.currentProject.work(WorkKind.foundations).quantity, 12);
+        expect(
+          saved.currentProject.works.where((work) => work.included),
+          hasLength(1),
+        );
+        expect(
+          calculateProject(saved.currentProject).totalCost,
+          closeTo(old_engine.calculate(custom, old.inputs).totalCost, 1e-8),
+        );
+        expect(await store.read(AppRepository.storageKey), raw);
+        expect(await store.read(ProjectRepository.legacyBackupKey), raw);
+        expect(await store.read(ProjectRepository.migrationMarkerKey), '2');
+
+        await tapKey('project_picker');
+        await tapKey('example_project');
+        saved = (await ProjectRepository(store: store).load()).data;
+        final exampleId = saved.currentProjectId;
+        expect(
+          calculateProject(saved.currentProject).totalCost,
+          closeTo(86364.20, 1e-8),
+        );
+        await tapKey('tab_prices');
+        await enter('$exampleId:price:cement', '٤٠');
+        await repository.flush();
+        await tapKey('tab_results');
+        expect(find.text('86,026.20'), findsOneWidget);
+        saved = (await ProjectRepository(store: store).load()).data;
+        expect(saved.currentProject.materialPrices['cement'], 40);
+        expect(saved.projects.first.materialPrices['cement'], 42);
+        final snapshot = calculateProject(saved.currentProject);
+        final bytes = await ProjectReportService.generate(snapshot);
+        expect(String.fromCharCodes(bytes.take(5)), '%PDF-');
+        expect(snapshot.totalCost, closeTo(86026.20, 1e-8));
+        expect(snapshot.work(WorkKind.roof).cost, isNull);
+
+        await tester.pumpWidget(const SizedBox.shrink());
+        await settle();
+        await repository.flush();
+        repository = ProjectRepository(store: store);
+        await tester.pumpWidget(HasrApp(repository: repository));
+        await settle();
+        expect(find.text('مثال الأوراق'), findsOneWidget);
+        await tapKey('tab_results');
+        expect(find.text('86,026.20'), findsOneWidget);
+        await tapKey('project_picker');
+        await tester.tap(find.text('مشروعي السابق'));
+        await settle();
+        await tapKey('tab_project');
+        await enter('migrated-project-v1:quantity:foundations', '٢١');
+        await repository.flush();
+        saved = (await ProjectRepository(store: store).load()).data;
+        expect(saved.projects, hasLength(2));
+        expect(saved.currentProject.work(WorkKind.foundations).quantity, 21);
+        expect(saved.projects.last.work(WorkKind.foundations).quantity, 20);
+        expect(saved.projects.last.materialPrices['cement'], 40);
+        expect(tester.takeException(), isNull);
+      } finally {
+        await tester.pumpWidget(const SizedBox.shrink());
+        await settle();
+        await repository.flush();
+        await store.clear();
+      }
+    },
+  );
 }

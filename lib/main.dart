@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
-import 'data/app_repository.dart';
+import 'project/repository.dart';
 import 'ui/app_theme.dart';
-import 'ui/calculator_screen.dart';
+import 'ui/project_shell.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -10,18 +10,18 @@ void main() {
 }
 
 class HasrApp extends StatelessWidget {
-  HasrApp({super.key, AppRepository? repository})
-    : repository = repository ?? AppRepository();
-  final AppRepository repository;
+  HasrApp({super.key, ProjectRepository? repository})
+    : repository = repository ?? ProjectRepository();
+  final ProjectRepository repository;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
-    title: 'حصر القواعد',
+    title: 'حصر المشروع',
     debugShowCheckedModeBanner: false,
     locale: const Locale('ar'),
     supportedLocales: const [Locale('ar')],
     localizationsDelegates: GlobalMaterialLocalizations.delegates,
     theme: appTheme(),
-    home: CalculatorScreen(repository: repository),
+    home: ProjectShell(repository: repository),
   );
 }

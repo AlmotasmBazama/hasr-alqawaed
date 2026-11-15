@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hasr_alqawaed/data/app_repository.dart';
 import 'package:hasr_alqawaed/domain/models.dart';
-import 'package:hasr_alqawaed/main.dart';
+import 'support/legacy_app.dart';
 
 class _MemoryStore implements KeyValueStore {
   String? value;
@@ -36,7 +36,7 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(
-      HasrApp(repository: AppRepository(store: _MemoryStore())),
+      LegacyHasrApp(repository: AppRepository(store: _MemoryStore())),
     );
     await tester.pumpAndSettle();
     final count = find.byKey(const ValueKey('count'));
@@ -67,7 +67,7 @@ void main() {
     (tester) async {
       final store = _MemoryStore();
       final repository = AppRepository(store: store);
-      await tester.pumpWidget(HasrApp(repository: repository));
+      await tester.pumpWidget(LegacyHasrApp(repository: repository));
       await tester.pumpAndSettle();
       final count = find.byKey(const ValueKey('count'));
       await tester.enterText(count, '');
@@ -115,7 +115,7 @@ void main() {
         tester.platformDispatcher.clearTextScaleFactorTestValue();
       });
       final repository = AppRepository(store: _MemoryStore());
-      await tester.pumpWidget(HasrApp(repository: repository));
+      await tester.pumpWidget(LegacyHasrApp(repository: repository));
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
       for (var i = 0; i < 6; i++) {
@@ -159,7 +159,9 @@ void main() {
       concretePerFoundation: 1,
     );
     store.value = jsonEncode(AppData(customModels: [custom]).toJson());
-    await tester.pumpWidget(HasrApp(repository: AppRepository(store: store)));
+    await tester.pumpWidget(
+      LegacyHasrApp(repository: AppRepository(store: store)),
+    );
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const ValueKey('count')), '١٠');
     final price = find.byKey(const ValueKey('price_0'));
