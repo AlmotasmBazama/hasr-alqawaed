@@ -6,6 +6,8 @@ An Arabic RTL Flutter application for project quantity takeoffs and cost estimat
 
 **[Live demo](https://hasr-alqawaed-preview.web.app)** · **[العربية](README.ar.md)** · **[Sample report](docs/sample-report.pdf)**
 
+The **[original foundation-only app (v1)](https://hasr-alqawaed-v1.web.app/)** remains available independently. The **[latest project estimator](https://hasr-alqawaed-preview.web.app/)** keeps its existing address. Each origin has separate local storage.
+
 <table><tr><td><img src="docs/images/project.png" width="260" alt="Project quantities"></td><td><img src="docs/images/prices.png" width="260" alt="Project prices"></td><td><img src="docs/images/results.png" width="260" alt="Calculated totals and material quantities"></td></tr></table>
 
 ## Features
@@ -94,6 +96,8 @@ Physical-phone browser sharing and iOS builds are not verified. iOS needs macOS/
 ## Hosting
 
 The existing Firebase Hosting site is defined in `.firebaserc` and `firebase.json`. No Firebase SDK is required. For a separate deployment, configure your own project/site IDs.
+
+The original app is preserved on the separate `hasr-alqawaed-v1` live site, cloned from archived Hosting version `25763ed3cfbaec6b`. The tracked deployment configuration targets only the latest app, `hasr-alqawaed-preview`; do not deploy the current project build over the original site.
 
 ```sh
 flutter build web --release --no-web-resources-cdn
