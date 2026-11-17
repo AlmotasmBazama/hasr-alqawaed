@@ -3,8 +3,9 @@ import 'models.dart';
 
 enum WorkStatus {
   calculated('محسوب'),
+  zeroQuantity('لا توجد كمية'),
   needsData('يحتاج بيانات'),
-  excluded('غير مضاف'),
+  excluded('غير مطلوب'),
   noModel('بانتظار النموذج');
 
   const WorkStatus(this.label);
@@ -17,6 +18,8 @@ class CalculatedLine {
     required this.kind,
     required this.modelId,
     required this.row,
+    required this.inputQuantity,
+    required this.inputUnit,
     required this.rawQuantity,
     required this.quantity,
     required this.unitPrice,
@@ -27,6 +30,10 @@ class CalculatedLine {
   final WorkKind kind;
   final String modelId;
   final ModelRow row;
+
+  /// The measured work input, before applying the consumption coefficient.
+  final double inputQuantity;
+  final QuantityUnit inputUnit;
   final double rawQuantity;
   final double quantity;
   final double unitPrice;
@@ -35,6 +42,7 @@ class CalculatedLine {
   String get label => row.label;
   QuantityUnit get unit => row.unit;
   String? get materialId => row.materialId;
+  QuantitySource get quantitySource => row.quantitySource;
   bool get isMaterial => row.isMaterial;
   bool get reviewBasis => row.reviewBasis;
 }
@@ -94,16 +102,32 @@ class ProjectResult {
   final double materialCost;
   final double serviceCost;
   final double totalCost;
+  double get baseCost => totalCost;
+  double? get profitPercentage => project.profitPercentage;
+  double? get profitAmount {
+    final percentage = profitPercentage;
+    if (percentage == null || !validProfitPercentage(percentage)) return null;
+    final amount = baseCost * (percentage / 100);
+    return validNonnegative(amount) ? amount : null;
+  }
+
+  double? get quotationTotal {
+    final profit = profitAmount;
+    if (profit == null) return null;
+    final quotation = baseCost + profit;
+    return validNonnegative(quotation) ? quotation : null;
+  }
+
   final List<String> notes;
   int get calculatedCount =>
       works.where((work) => work.status == WorkStatus.calculated).length;
   bool get hasReviewableServices => services.any((line) => line.reviewBasis);
-  bool get isPartial =>
-      calculatedCount == 0 ||
-      hasReviewableServices ||
-      works.any(
-        (work) => work.entry.included && work.status != WorkStatus.calculated,
-      );
+  Iterable<WorkResult> get unfinishedWorks => works.where(
+    (work) =>
+        work.status == WorkStatus.needsData ||
+        work.status == WorkStatus.noModel,
+  );
+  bool get isPartial => unfinishedWorks.isNotEmpty;
   WorkResult work(WorkKind kind) =>
       works.firstWhere((work) => work.kind == kind);
 }
@@ -125,14 +149,27 @@ double? rowPrice(Project project, WorkEntry work, ModelRow row) {
 }
 
 WorkResult _calculateWork(Project project, WorkEntry entry) {
-  if (!entry.included) {
+  if (entry.explicitlyExcluded) {
     return WorkResult(entry: entry, status: WorkStatus.excluded);
+  }
+  final length = entry.roofBeamLength;
+  final hasAllInputs =
+      entry.quantityValid &&
+      (!entry.requiresRoofBeamLength ||
+          length != null && validNonnegative(length));
+  if (hasAllInputs &&
+      entry.quantity == 0 &&
+      (!entry.requiresRoofBeamLength || length == 0)) {
+    return WorkResult(entry: entry, status: WorkStatus.zeroQuantity);
+  }
+  if (!entry.included) {
+    return WorkResult(entry: entry, status: WorkStatus.needsData);
   }
   final model = entry.model;
   if (model == null) {
     return WorkResult(entry: entry, status: WorkStatus.noModel);
   }
-  if (!entry.quantityValid || !model.isValid || model.kind != entry.kind) {
+  if (!hasAllInputs || !model.isValid || model.kind != entry.kind) {
     return WorkResult(entry: entry, status: WorkStatus.needsData);
   }
   final lines = <CalculatedLine>[];
@@ -152,7 +189,8 @@ WorkResult _calculateWork(Project project, WorkEntry entry) {
         return WorkResult(entry: entry, status: WorkStatus.needsData);
       }
     }
-    final rawQuantity = entry.quantity! * row.coefficient;
+    final inputQuantity = entry.quantityFor(row.quantitySource)!;
+    final rawQuantity = inputQuantity * row.coefficient;
     final quantity = rawQuantity / row.divisor;
     final cost = quantity * price;
     if (![rawQuantity, quantity, cost].every(validNonnegative)) {
@@ -176,6 +214,8 @@ WorkResult _calculateWork(Project project, WorkEntry entry) {
         kind: entry.kind,
         modelId: model.id,
         row: row,
+        inputQuantity: inputQuantity,
+        inputUnit: entry.unitFor(row.quantitySource),
         rawQuantity: rawQuantity,
         quantity: quantity,
         unitPrice: price,
@@ -246,21 +286,29 @@ ProjectResult calculateProject(Project project) {
   }
   final notes = <String>[];
   if (services.any((line) => line.reviewBasis)) {
-    notes.add('تقدير مبدئي — توجد وحدات خدمات قابلة للمراجعة');
+    notes.add('تقدير مبدئي — توجد وحدات خدمات قابلة للمراجعة حسب الورقة:');
+    notes.addAll(
+      services
+          .where((line) => line.reviewBasis)
+          .map(
+            (line) =>
+                '${line.kind.label}: ${line.label} لكل ${line.unit.label}.',
+          ),
+    );
   }
-  if (works.any(
-    (work) =>
-        work.kind == WorkKind.roof &&
-        work.entry.included &&
-        work.status != WorkStatus.calculated,
-  )) {
+  final roof = works.firstWhere((work) => work.kind == WorkKind.roof);
+  if (roof.status == WorkStatus.calculated &&
+      roof.entry.model?.id == roofModelId) {
+    notes.addAll([roofLaborBasisNote, roofCorrectionNote, roofScopeNote]);
+  }
+  if (roof.status != WorkStatus.calculated &&
+      roof.status != WorkStatus.zeroQuantity) {
     notes.add('السقف غير مشمول في الإجمالي');
   }
   final unfinished = works.where(
     (work) =>
-        work.entry.included &&
-        work.status != WorkStatus.calculated &&
-        work.kind != WorkKind.roof,
+        work.status == WorkStatus.needsData ||
+        work.status == WorkStatus.noModel,
   );
   if (unfinished.isNotEmpty) {
     notes.add(

@@ -10,7 +10,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   test(
-    'project report embeds local fonts and the same complete estimate',
+    'original estimate report keeps embedded Cairo and a frozen price snapshot',
     () async {
       final project = createExampleProject(
         id: 'report-example',
@@ -44,7 +44,28 @@ void main() {
       );
       expect(calculateProject(changed).totalCost, closeTo(86026.20, 1e-8));
       expect(screenResult.totalCost, closeTo(86364.20, 1e-8));
+    },
+  );
 
+  test(
+    'full quotation exports the roof and profit from the screen snapshot',
+    () async {
+      final project = createFullExampleProject(
+        id: 'roof-report',
+      ).copyWith(profitPercentage: 10, location: 'بنغازي', date: '2026-11-15');
+      final snapshot = calculateProject(project);
+      final roof = snapshot.work(WorkKind.roof);
+      expect(roof.lines, hasLength(9));
+      expect(roof.cost, closeTo(61567.50, 1e-8));
+      expect(snapshot.quotationTotal, closeTo(162724.87, 1e-8));
+      expect(snapshot.isPartial, isFalse);
+
+      final bytes = await ProjectReportService.generate(
+        snapshot,
+        createdAt: DateTime(2026, 11, 17),
+      );
+      expect(String.fromCharCodes(bytes.take(5)), '%PDF-');
+      expect(String.fromCharCodes(bytes), contains('/FontFile2'));
       if (const bool.fromEnvironment('GENERATE_SAMPLE')) {
         final file = File('output/pdf/hasr_project_sample.pdf');
         await file.parent.create(recursive: true);
@@ -88,7 +109,7 @@ void main() {
         RegExp(
           r'/Type\s*/Page\b',
         ).allMatches(String.fromCharCodes(bytes)).length,
-        greaterThan(5),
+        greaterThan(3),
       );
     },
   );

@@ -8,8 +8,8 @@ import 'engine.dart';
 import 'models.dart';
 import 'repository.dart';
 
-/// Persistent data and transient edit buffers have separate lifetimes. Empty
-/// drafts invalidate the live estimate without replacing the last valid save.
+/// Numeric edits retain their exact text during the session. Invalid edits also
+/// survive reopening, without overwriting the user's last valid number.
 class ProjectController extends ChangeNotifier {
   ProjectController(this.repository);
 
@@ -18,15 +18,18 @@ class ProjectController extends ChangeNotifier {
   String? warning;
   bool saving = false;
   bool _disposed = false;
-  Timer? _debounce;
   final Map<String, String> _drafts = {};
+  Project? _lastSnapshot;
+  ProjectResult? _lastResult;
 
   bool get loaded => state != null;
   bool get editable => loaded && repository.canWrite && !saving;
   Project get savedProject => state!.currentProject;
   String _key(String field) => '${savedProject.id}:$field';
   String draft(String field, double? value) =>
-      _drafts[_key(field)] ?? (value == null ? '' : inputNumber(value));
+      _drafts[_key(field)] ??
+      savedProject.inputDrafts[field] ??
+      (value == null ? '' : inputNumber(value));
 
   Future<void> load() async {
     final result = await repository.load();
@@ -48,116 +51,204 @@ class ProjectController extends ChangeNotifier {
 
   Project get project {
     var current = savedProject;
+    final drafts = current.inputDrafts;
+    if (drafts.isEmpty) return current;
     final materials = Map<String, double?>.of(current.materialPrices);
     final services = Map<String, double?>.of(current.servicePrices);
+    var profit = current.profitPercentage;
+    if (drafts.containsKey('profitPercentage')) profit = null;
     for (final material in materialCatalog) {
-      final raw = _drafts[_key('material:${material.id}')];
-      if (raw != null) materials[material.id] = parseDecimal(raw);
+      if (drafts.containsKey('material:${material.id}')) {
+        materials[material.id] = null;
+      }
     }
     for (final entry in current.works) {
       var work = entry;
-      final raw = _drafts[_key('quantity:${entry.kind.name}')];
-      if (raw != null) {
-        work = work.copyWith(quantity: parseQuantity(entry.kind, raw));
+      if (drafts.containsKey('quantity:${entry.kind.name}')) {
+        work = work.copyWith(quantity: null);
+      }
+      if (entry.kind == WorkKind.roof && drafts.containsKey('roofBeamLength')) {
+        work = work.copyWith(roofBeamLength: null);
       }
       final overrides = Map<String, double?>.of(work.priceOverrides);
       for (final row in work.model?.rows ?? <ModelRow>[]) {
         final serviceKey = servicePriceKey(work.kind, row);
-        final price = _drafts[_key('service:$serviceKey')];
-        if (price != null) services[serviceKey] = parseDecimal(price);
-        final override = _drafts[_key('override:${work.kind.name}:${row.id}')];
-        if (override != null) overrides[row.id] = parseDecimal(override);
+        if (drafts.containsKey('service:$serviceKey')) {
+          services[serviceKey] = null;
+        }
+        if (drafts.containsKey('override:${work.kind.name}:${row.id}')) {
+          overrides[row.id] = null;
+        }
       }
       current = current.updateWork(work.copyWith(priceOverrides: overrides));
     }
-    return current.copyWith(materialPrices: materials, servicePrices: services);
+    return current.copyWith(
+      materialPrices: materials,
+      servicePrices: services,
+      profitPercentage: profit,
+    );
   }
 
+  /// Live, uncommitted preview for editing model details only.
   ProjectResult get result => calculateProject(project);
 
+  ProjectResult? get calculatedResult {
+    final snapshot = state?.currentProject.calculatedProject;
+    if (snapshot == null) return null;
+    if (!identical(snapshot, _lastSnapshot)) {
+      _lastSnapshot = snapshot;
+      _lastResult = calculateProject(snapshot);
+    }
+    return _lastResult;
+  }
+
+  bool get needsRecalculation =>
+      state?.currentProject.calculationStale ?? false;
+
+  Future<void> calculate() async {
+    final snapshot = project.copyWith(
+      inputDrafts: const {},
+      calculatedProject: null,
+      calculationStale: false,
+    );
+    final calculated = calculateProject(snapshot);
+    await _commit(
+      state!.updateProject(
+        savedProject.copyWith(
+          calculatedProject: snapshot,
+          calculationStale: false,
+        ),
+      ),
+      onSaved: () {
+        _lastSnapshot = snapshot;
+        _lastResult = calculated;
+      },
+    );
+  }
+
+  Project _stale(Project project) => project.calculatedProject == null
+      ? project
+      : project.copyWith(calculationStale: true);
+
   void _changed(Project project) {
-    state = state!.updateProject(project);
-    _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 400), saveNow);
+    state = state!.updateProject(_stale(project));
+    // Queue the write before notifying the UI, so an immediate browser reload
+    // cannot leave an intentional edit waiting on an autosave timer.
+    unawaited(saveNow());
     notifyListeners();
+  }
+
+  Project _withDraft(Project project, String field, String raw, double? value) {
+    _drafts[_key(field)] = raw;
+    final invalidDrafts = {...project.inputDrafts};
+    if (value == null) {
+      invalidDrafts[field] = raw;
+    } else {
+      invalidDrafts.remove(field);
+    }
+    return project.copyWith(inputDrafts: invalidDrafts);
   }
 
   void quantity(WorkKind kind, String raw) {
     if (!editable) return;
-    _drafts[_key('quantity:${kind.name}')] = raw;
     final number = parseQuantity(kind, raw);
+    var next = _withDraft(savedProject, 'quantity:${kind.name}', raw, number);
     if (number != null) {
-      _changed(
-        savedProject.updateWork(
-          savedProject.work(kind).copyWith(quantity: number),
-        ),
+      next = next.updateWork(
+        next
+            .work(kind)
+            .copyWith(quantity: number, included: number > 0 ? true : null),
       );
-    } else {
-      notifyListeners();
     }
+    _changed(next);
+  }
+
+  void roofBeamLength(String raw) {
+    if (!editable) return;
+    final number = parseDecimal(raw);
+    var next = _withDraft(savedProject, 'roofBeamLength', raw, number);
+    if (number != null) {
+      next = next.updateWork(
+        next
+            .work(WorkKind.roof)
+            .copyWith(
+              roofBeamLength: number,
+              included: number > 0 ? true : null,
+            ),
+      );
+    }
+    _changed(next);
+  }
+
+  void profitPercentage(String raw) {
+    if (!editable) return;
+    final parsed = parseDecimal(raw);
+    final value = parsed != null && validProfitPercentage(parsed)
+        ? parsed
+        : null;
+    final next = _withDraft(savedProject, 'profitPercentage', raw, value);
+    _changed(value == null ? next : next.copyWith(profitPercentage: value));
   }
 
   void materialPrice(String id, String raw) {
     if (!editable) return;
-    _drafts[_key('material:$id')] = raw;
     final value = parseDecimal(raw);
-    if (value != null) {
-      _changed(
-        savedProject.copyWith(
-          materialPrices: {...savedProject.materialPrices, id: value},
-        ),
-      );
-    } else {
-      notifyListeners();
-    }
+    final next = _withDraft(savedProject, 'material:$id', raw, value);
+    _changed(
+      value == null
+          ? next
+          : next.copyWith(materialPrices: {...next.materialPrices, id: value}),
+    );
   }
 
   void servicePrice(WorkKind kind, ModelRow row, String raw) {
     if (!editable) return;
     final key = servicePriceKey(kind, row);
-    _drafts[_key('service:$key')] = raw;
     final value = parseDecimal(raw);
-    if (value != null) {
-      _changed(
-        savedProject.copyWith(
-          servicePrices: {...savedProject.servicePrices, key: value},
-        ),
-      );
-    } else {
-      notifyListeners();
-    }
+    final next = _withDraft(savedProject, 'service:$key', raw, value);
+    _changed(
+      value == null
+          ? next
+          : next.copyWith(servicePrices: {...next.servicePrices, key: value}),
+    );
   }
 
   void overridePrice(WorkKind kind, ModelRow row, String raw) {
     if (!editable) return;
-    _drafts[_key('override:${kind.name}:${row.id}')] = raw;
     final value = parseDecimal(raw);
+    var next = _withDraft(
+      savedProject,
+      'override:${kind.name}:${row.id}',
+      raw,
+      value,
+    );
     if (value != null) {
-      final work = savedProject.work(kind);
-      _changed(
-        savedProject.updateWork(
-          work.copyWith(
-            priceOverrides: {...work.priceOverrides, row.id: value},
-          ),
-        ),
+      final work = next.work(kind);
+      next = next.updateWork(
+        work.copyWith(priceOverrides: {...work.priceOverrides, row.id: value}),
       );
-    } else {
-      notifyListeners();
     }
+    _changed(next);
   }
 
   void clearOverride(WorkKind kind, ModelRow row) {
     if (!editable) return;
-    _drafts.remove(_key('override:${kind.name}:${row.id}'));
+    final field = 'override:${kind.name}:${row.id}';
+    _drafts.remove(_key(field));
     final work = savedProject.work(kind);
     final overrides = Map<String, double?>.of(work.priceOverrides)
       ..remove(row.id);
-    _changed(savedProject.updateWork(work.copyWith(priceOverrides: overrides)));
+    final drafts = {...savedProject.inputDrafts}..remove(field);
+    _changed(
+      savedProject
+          .updateWork(work.copyWith(priceOverrides: overrides))
+          .copyWith(inputDrafts: drafts),
+    );
   }
 
   bool hasOverride(WorkKind kind, ModelRow row) =>
       savedProject.work(kind).priceOverrides.containsKey(row.id) ||
-      _drafts.containsKey(_key('override:${kind.name}:${row.id}'));
+      savedProject.inputDrafts.containsKey('override:${kind.name}:${row.id}');
 
   void include(WorkKind kind, bool value) {
     if (!editable) return;
@@ -190,7 +281,7 @@ class ProjectController extends ChangeNotifier {
     bool register = false,
   }) async {
     final old = savedProject.work(kind);
-    final unitChanged = old.model?.inputUnit != model.inputUnit;
+    final unitChanged = old.inputUnit != model.inputUnit;
     final compatibleRows = <String>{};
     for (final row in model.rows) {
       final oldRow = old.model?.rows
@@ -211,23 +302,28 @@ class ProjectController extends ChangeNotifier {
             override.key: override.value,
       },
     );
-    var next = state!.updateProject(savedProject.updateWork(entry));
+    final quantityField = 'quantity:${kind.name}';
+    final overrideFieldPrefix = 'override:${kind.name}:';
+    bool discardDraft(String field) =>
+        (unitChanged && field == quantityField) ||
+        (field.startsWith(overrideFieldPrefix) &&
+            !compatibleRows.contains(
+              field.substring(overrideFieldPrefix.length),
+            ));
+    final drafts = {...savedProject.inputDrafts}
+      ..removeWhere((field, _) => discardDraft(field));
+    var next = state!.updateProject(
+      _stale(savedProject.updateWork(entry).copyWith(inputDrafts: drafts)),
+    );
     if (register) {
-      next = next.copyWith(
-        customModels: [
-          for (final existing in next.customModels)
-            if (existing.id != model.id) existing,
-          model,
-        ],
-      );
+      next = next.upsertModel(model);
     }
     await _commit(next);
-    if (unitChanged) _drafts.remove(_key('quantity:${kind.name}'));
-    final overridePrefix = _key('override:${kind.name}:');
+    final draftPrefix = '${savedProject.id}:';
     _drafts.removeWhere(
       (key, _) =>
-          key.startsWith(overridePrefix) &&
-          !compatibleRows.contains(key.substring(overridePrefix.length)),
+          key.startsWith(draftPrefix) &&
+          discardDraft(key.substring(draftPrefix.length)),
     );
     if (!_disposed) notifyListeners();
   }
@@ -235,8 +331,15 @@ class ProjectController extends ChangeNotifier {
   Future<void> selectProject(String id) =>
       _commit(state!.copyWith(currentProjectId: id));
 
-  Future<void> addProject({bool example = false}) async {
-    final created = example ? createExampleProject() : createProject();
+  Future<void> addProject({
+    bool example = false,
+    bool fullExample = false,
+  }) async {
+    final created = fullExample
+        ? createFullExampleProject()
+        : example
+        ? createExampleProject()
+        : createProject();
     await _commit(
       state!.copyWith(
         projects: [...state!.projects, created],
@@ -247,22 +350,24 @@ class ProjectController extends ChangeNotifier {
 
   Future<void> metadata(String name, String date, String location) => _commit(
     state!.updateProject(
-      savedProject.copyWith(
-        name: name.trim(),
-        date: date,
-        location: location.trim(),
+      _stale(
+        savedProject.copyWith(
+          name: name.trim(),
+          date: date,
+          location: location.trim(),
+        ),
       ),
     ),
   );
 
-  Future<void> _commit(ProjectState next) async {
+  Future<void> _commit(ProjectState next, {VoidCallback? onSaved}) async {
     if (!editable) throw StateError('الحفظ غير متاح الآن');
-    _debounce?.cancel();
     saving = true;
     notifyListeners();
     try {
       await repository.save(next);
       state = next;
+      onSaved?.call();
       warning = null;
     } catch (_) {
       warning =
@@ -275,7 +380,6 @@ class ProjectController extends ChangeNotifier {
   }
 
   Future<void> saveNow() async {
-    _debounce?.cancel();
     if (!loaded || !repository.canWrite || saving) return;
     try {
       await repository.save(state!);
@@ -290,7 +394,6 @@ class ProjectController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
-    _debounce?.cancel();
     super.dispose();
   }
 }

@@ -41,6 +41,14 @@ class _WorkModelEditorState extends State<WorkModelEditor> {
   bool _saving = false;
   String? _error;
   int _rowSerial = 0;
+  bool get _roof => widget.kind == WorkKind.roof;
+  bool get _hasExplicitRoofSource =>
+      _rows.any((row) => row.quantitySource != QuantitySource.workQuantity);
+  bool get _hasLegacyRoofSource =>
+      widget.initial?.rows.any(
+        (row) => row.quantitySource == QuantitySource.workQuantity,
+      ) ??
+      false;
 
   @override
   void dispose() {
@@ -101,6 +109,10 @@ class _WorkModelEditorState extends State<WorkModelEditor> {
             label: material?.label ?? '',
             materialId: material?.id,
             unit: material?.unit ?? _unit,
+            quantitySource:
+                !_roof || _hasLegacyRoofSource && !_hasExplicitRoofSource
+                ? QuantitySource.workQuantity
+                : QuantitySource.roofArea,
             coefficient: 0,
             defaultPrice: material?.defaultPrice ?? 0,
           ),
@@ -116,12 +128,22 @@ class _WorkModelEditorState extends State<WorkModelEditor> {
       setState(() => _error = 'أضف مادة أو خدمة واحدة على الأقل.');
       return;
     }
+    if (_roof &&
+        _hasExplicitRoofSource &&
+        _unit != QuantityUnit.area &&
+        _rows.any((row) => row.quantitySource == QuantitySource.workQuantity)) {
+      setState(
+        () => _error =
+            'حدّد مصدرًا واضحًا لكل سطر قبل تغيير وحدة مدخل السقف القديم.',
+      );
+      return;
+    }
     final model = WorkModel(
       id: _id,
       kind: widget.kind,
       name: _name.text.trim(),
       description: _description.text.trim(),
-      inputUnit: _unit,
+      inputUnit: _hasExplicitRoofSource ? QuantityUnit.area : _unit,
       rows: _rows.map((row) => row.value()).toList(),
     );
     if (!model.isValid) {
@@ -179,7 +201,7 @@ class _WorkModelEditorState extends State<WorkModelEditor> {
             children: [
               Expanded(
                 child: Text(
-                  'السطر ${index + 1} • ${row.row.isMaterial ? 'مادة' : 'مصنعية / خدمة'}',
+                  'السطر ${index + 1} • ${row.isMaterial ? 'مادة' : 'مصنعية / خدمة'}',
                   style: const TextStyle(
                     fontWeight: FontWeight.w700,
                     color: primaryGreen,
@@ -198,29 +220,76 @@ class _WorkModelEditorState extends State<WorkModelEditor> {
               ),
             ],
           ),
-          if (row.row.isMaterial)
-            Text(
-              '${row.row.label} • ${row.row.unit.label}',
-              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-            )
-          else
-            TextFormField(
-              controller: row.label,
-              enabled: !_saving,
-              decoration: const InputDecoration(
-                labelText: 'اسم المصنعية أو الخدمة',
+          DropdownButtonFormField<String>(
+            initialValue: row.materialId ?? '__service',
+            isExpanded: true,
+            decoration: const InputDecoration(labelText: 'المادة أو الخدمة'),
+            items: [
+              for (final material in materialCatalog)
+                DropdownMenuItem(
+                  value: material.id,
+                  child: Text(material.label),
+                ),
+              const DropdownMenuItem(
+                value: '__service',
+                child: Text('مصنعية أو خدمة'),
               ),
-              validator: (value) =>
-                  value!.trim().isEmpty ? 'أدخل اسم السطر' : null,
+            ],
+            onChanged: _saving
+                ? null
+                : (value) => setState(() {
+                    final material = value == '__service' || value == null
+                        ? null
+                        : materialById(value);
+                    row.selectMaterial(material);
+                  }),
+          ),
+          const SizedBox(height: 16),
+          TextFormField(
+            controller: row.label,
+            enabled: !_saving,
+            decoration: const InputDecoration(labelText: 'اسم السطر'),
+            validator: (value) =>
+                value!.trim().isEmpty ? 'أدخل اسم السطر' : null,
+          ),
+          if (_roof) ...[
+            const SizedBox(height: 16),
+            DropdownButtonFormField<QuantitySource>(
+              key: ValueKey('roof_source_$index'),
+              initialValue: row.quantitySource,
+              isExpanded: true,
+              decoration: const InputDecoration(labelText: 'يُحسب حسب'),
+              items: [
+                for (final source in QuantitySource.values)
+                  if (source != QuantitySource.workQuantity ||
+                      _hasLegacyRoofSource)
+                    DropdownMenuItem(
+                      value: source,
+                      child: Text(
+                        source == QuantitySource.workQuantity
+                            ? 'مدخل النموذج السابق (${_unit.label})'
+                            : quantitySourceLabel(source),
+                      ),
+                    ),
+              ],
+              onChanged: _saving
+                  ? null
+                  : (value) {
+                      if (value != null) {
+                        setState(() => row.quantitySource = value);
+                      }
+                    },
             ),
+          ],
           const SizedBox(height: 18),
           _numeric(
             row.coefficient,
-            'الكمية لكل ${_unit.label}',
+            'الكمية لكل ${_sourceInputUnit(row.quantitySource).label}',
             key: ValueKey('coefficient_$index'),
           ),
           const SizedBox(height: 16),
           DropdownButtonFormField<QuantityUnit>(
+            key: ValueKey('source_unit_${row.row.id}:${row.materialId}'),
             initialValue: row.sourceUnit ?? row.row.unit,
             isExpanded: true,
             decoration: const InputDecoration(labelText: 'وحدة الكمية الأولية'),
@@ -244,7 +313,12 @@ class _WorkModelEditorState extends State<WorkModelEditor> {
             'الكمية المسعّرة = مقدار البند × المعامل ÷ معامل القسمة. الناتج: ${row.unit.label}',
             style: const TextStyle(fontSize: 12, color: secondaryText),
           ),
-          if (!row.row.isMaterial) ...[
+          if (row.isMaterial)
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Text('وحدة الناتج حسب المادة: ${row.unit.label}'),
+            )
+          else ...[
             const SizedBox(height: 16),
             DropdownButtonFormField<QuantityUnit>(
               initialValue: row.unit,
@@ -283,6 +357,12 @@ class _WorkModelEditorState extends State<WorkModelEditor> {
       ),
     ),
   );
+
+  QuantityUnit _sourceInputUnit(QuantitySource source) => switch (source) {
+    QuantitySource.workQuantity => _unit,
+    QuantitySource.roofArea => QuantityUnit.area,
+    QuantitySource.roofBeamLength => QuantityUnit.linear,
+  };
 
   @override
   Widget build(BuildContext context) => PopScope(
@@ -325,7 +405,7 @@ class _WorkModelEditorState extends State<WorkModelEditor> {
                 ),
               ),
               const SizedBox(height: 16),
-              if (widget.kind == WorkKind.roof)
+              if (_roof && _hasLegacyRoofSource && !_hasExplicitRoofSource)
                 DropdownButtonFormField<QuantityUnit>(
                   initialValue: _unit,
                   isExpanded: true,
@@ -340,7 +420,7 @@ class _WorkModelEditorState extends State<WorkModelEditor> {
                       ? null
                       : (value) => setState(() => _unit = value!),
                 )
-              else
+              else if (!_roof)
                 Text(
                   'جميع معاملات هذا النموذج لكل ${_unit.label}.',
                   style: const TextStyle(color: secondaryText),
@@ -386,6 +466,8 @@ class _RowDraft {
       price = TextEditingController(text: inputNumber(row.defaultPrice)),
       unit = row.unit,
       sourceUnit = row.sourceUnit,
+      materialId = row.materialId,
+      quantitySource = row.quantitySource,
       review = row.reviewBasis;
   final ModelRow row;
   final TextEditingController label;
@@ -394,14 +476,35 @@ class _RowDraft {
   final TextEditingController price;
   QuantityUnit unit;
   QuantityUnit? sourceUnit;
+  String? materialId;
+  QuantitySource quantitySource;
   bool review;
+  bool get isMaterial => materialId != null;
+
+  void selectMaterial(MaterialDefinition? material) {
+    if (materialId == material?.id) return;
+    materialId = material?.id;
+    if (material != null) {
+      label.text = material.label;
+      unit = material.unit;
+      sourceUnit = null;
+      price.text = inputNumber(material.defaultPrice);
+      review = false;
+    } else {
+      label.clear();
+      price.text = '0';
+    }
+  }
+
   ModelRow value() => row.copyWith(
-    label: row.isMaterial ? row.label : label.text.trim(),
+    label: label.text.trim(),
+    materialId: materialId,
     coefficient: parseDecimal(coefficient.text)!,
     divisor: parseDecimal(divisor.text)!,
     defaultPrice: parseDecimal(price.text)!,
     unit: unit,
     sourceUnit: sourceUnit,
+    quantitySource: quantitySource,
     reviewBasis: review,
   );
   void dispose() {

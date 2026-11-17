@@ -57,7 +57,207 @@ legacy.AppData oldData() {
   );
 }
 
+const _v2Key = 'hasr_project_state_v2';
+
+// The wire format from the previous build: no v3 fields or v3 model instances.
+String _v2Fixture() {
+  Map<String, Object?> roofModel(double coefficient) => {
+    'id': 'my-custom-roof',
+    'kind': 'roof',
+    'name': 'سقف بحسب الطول',
+    'description': 'نموذج بمدخل واحد',
+    'inputUnit': 'linear',
+    'rows': [
+      {
+        'id': 'legacy-concrete',
+        'label': 'خرسانة مسلحة',
+        'materialId': 'concrete',
+        'unit': 'volume',
+        'sourceUnit': null,
+        'coefficient': .1,
+        'divisor': 1,
+        'defaultPrice': 520,
+        'reviewBasis': false,
+      },
+      {
+        'id': 'roof25-carpenter',
+        'label': 'نجار خاص',
+        'materialId': null,
+        'unit': 'volume',
+        'sourceUnit': null,
+        'coefficient': coefficient,
+        'divisor': 1,
+        'defaultPrice': 95,
+        'reviewBasis': false,
+      },
+    ],
+  };
+  Map<String, Object?> project(String id, {required bool legacyRoof}) => {
+    'id': id,
+    'name': 'مشروع $id',
+    'date': '2026-11-08',
+    'location': 'بنغازي',
+    'works': [
+      for (final kind in [
+        'foundations',
+        'belowMasonry',
+        'tieBeam',
+        'leanSlab',
+        'columns',
+        'aboveMasonry',
+        'roof',
+      ])
+        {
+          'kind': kind,
+          'included': kind == 'roof' && legacyRoof,
+          'quantity': switch (kind) {
+            'roof' => legacyRoof ? 12.5 : 199.5,
+            'tieBeam' => 105,
+            _ => null,
+          },
+          'model': kind == 'roof' && legacyRoof ? roofModel(2) : null,
+          'priceOverrides': {
+            if (kind == 'roof' && legacyRoof) 'legacy-concrete': 555,
+          },
+        },
+    ],
+    'materialPrices': {'cement': legacyRoof ? 40 : 48, 'steel8': null},
+    'servicePrices': {'columns|casting|column': 39},
+    'isExample': false,
+  };
+  return jsonEncode({
+    'version': 2,
+    'projects': [
+      project('first', legacyRoof: false),
+      project('selected', legacyRoof: true),
+    ],
+    'currentProjectId': 'selected',
+    'customModels': [roofModel(3)],
+  });
+}
+
 void main() {
+  test(
+    'v2 migration keeps project selection, custom roof basis and prices',
+    () async {
+      final store = MemoryProjectStore();
+      final raw = _v2Fixture();
+      final v1 = jsonEncode(oldData().toJson());
+      store.values.addAll({_v2Key: raw, AppRepository.storageKey: v1});
+      final repository = ProjectRepository(store: store);
+      final result = await repository.load();
+
+      expect(result.warning, isNull);
+      expect(repository.canWrite, isTrue);
+      expect(result.data.currentProjectId, 'selected');
+      expect(result.data.projects.map((project) => project.id), [
+        'first',
+        'selected',
+      ]);
+      final current = result.data.currentProject;
+      final roof = current.work(WorkKind.roof);
+      expect(roof.model!.id, 'my-custom-roof');
+      expect(roof.quantity, 12.5);
+      expect(roof.inputUnit, QuantityUnit.linear);
+      expect(roof.requiresRoofBeamLength, isFalse);
+      expect(roof.roofBeamLength, isNull);
+      expect(roof.model!.rows.last.coefficient, 2);
+      expect(result.data.customModels.single.rows.last.coefficient, 3);
+      expect(roof.priceOverrides, {'legacy-concrete': 555.0});
+      expect(current.materialPrices['cement'], 40);
+      expect(current.materialPrices['steel6'], 260);
+      expect(current.materialPrices['hollowBlock'], 1.8);
+      expect(current.materialPrices.containsKey('steel8'), isTrue);
+      expect(current.materialPrices['steel8'], isNull);
+      expect(current.servicePrices['columns|casting|column'], 39);
+      expect(current.profitPercentage, 0);
+      expect(current.calculatedProject, isNull);
+      final calculated = calculateProject(current).work(WorkKind.roof);
+      expect(calculated.status, WorkStatus.calculated);
+      expect(calculated.cost, closeTo(3068.75, 1e-8));
+      expect(calculated.lines.last.unitPrice, 95);
+      final first = result.data.projects.first;
+      expect(first.materialPrices['cement'], 48);
+      expect(first.work(WorkKind.tieBeam).quantity, 105);
+      expect(first.work(WorkKind.tieBeam).explicitlyExcluded, isTrue);
+      expect(first.work(WorkKind.roof).model!.id, roofModelId);
+      expect(first.work(WorkKind.roof).quantity, 199.5);
+      expect(first.work(WorkKind.roof).roofBeamLength, isNull);
+      expect(first.work(WorkKind.roof).included, isFalse);
+      expect(store.values[_v2Key], raw);
+      expect(store.values[AppRepository.storageKey], v1);
+      expect(store.values[ProjectRepository.previousBackupKey], raw);
+      expect(store.writes, [
+        ProjectRepository.previousBackupKey,
+        ProjectRepository.storageKey,
+        ProjectRepository.previousMigrationMarkerKey,
+      ]);
+      final reopened = await ProjectRepository(store: store).load();
+      expect(reopened.data.toJson(), result.data.toJson());
+      expect(store.writes, hasLength(3));
+    },
+  );
+
+  for (final failKey in [
+    ProjectRepository.previousBackupKey,
+    ProjectRepository.storageKey,
+  ]) {
+    test(
+      'v2 migration retries safely after write failure at $failKey',
+      () async {
+        final raw = _v2Fixture();
+        final store = MemoryProjectStore()..failKey = failKey;
+        store.values[_v2Key] = raw;
+        final repository = ProjectRepository(store: store);
+        final failed = await repository.load();
+        expect(failed.warning, isNotNull);
+        expect(repository.canWrite, isFalse);
+        expect(store.values[ProjectRepository.storageKey], isNull);
+        expect(
+          store.values[ProjectRepository.previousMigrationMarkerKey],
+          isNull,
+        );
+        expect(store.values[_v2Key], raw);
+        if (failKey == ProjectRepository.storageKey) {
+          expect(store.values[ProjectRepository.previousBackupKey], raw);
+        }
+        await expectLater(repository.save(failed.data), throwsStateError);
+
+        store.failKey = null;
+        final retry = ProjectRepository(store: store);
+        final recovered = await retry.load();
+        expect(recovered.warning, isNull);
+        expect(retry.canWrite, isTrue);
+        expect(recovered.data.projects, hasLength(2));
+        expect(recovered.data.customModels, hasLength(1));
+        expect(store.values[ProjectRepository.previousBackupKey], raw);
+        expect(store.values[ProjectRepository.previousMigrationMarkerKey], '3');
+      },
+    );
+  }
+
+  test(
+    'corrupt v2 source is backed up and never replaced with older v1 data',
+    () async {
+      final store = MemoryProjectStore();
+      store.values.addAll({
+        _v2Key: '{broken',
+        AppRepository.storageKey: jsonEncode(oldData().toJson()),
+      });
+      final repository = ProjectRepository(store: store);
+      final result = await repository.load();
+      expect(result.warning, isNotNull);
+      expect(repository.canWrite, isFalse);
+      expect(store.values[_v2Key], '{broken');
+      expect(store.values[ProjectRepository.previousBackupKey], '{broken');
+      expect(store.values[ProjectRepository.storageKey], isNull);
+      expect(
+        store.values[ProjectRepository.previousMigrationMarkerKey],
+        isNull,
+      );
+    },
+  );
+
   test(
     'v1 migration preserves fractional custom model identity inputs and all six prices',
     () async {

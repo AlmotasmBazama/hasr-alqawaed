@@ -17,7 +17,7 @@ import 'package:hasr_alqawaed/services/project_report_service.dart';
 /// Native storage remains isolated from the application's own saved projects.
 class NativeTestStore implements KeyValueStore {
   final preferences = SharedPreferencesAsync();
-  static const prefix = 'hasr_v2_integration_';
+  static const prefix = 'hasr_v3_integration_';
   static const keys = [
     AppRepository.storageKey,
     ProjectRepository.storageKey,
@@ -113,7 +113,7 @@ void main() {
         );
         expect(await store.read(AppRepository.storageKey), raw);
         expect(await store.read(ProjectRepository.legacyBackupKey), raw);
-        expect(await store.read(ProjectRepository.migrationMarkerKey), '2');
+        expect(await store.read(ProjectRepository.migrationMarkerKey), '3');
 
         await tapKey('project_picker');
         await tapKey('example_project');
@@ -126,7 +126,8 @@ void main() {
         await tapKey('tab_prices');
         await enter('$exampleId:price:cement', '٤٠');
         await repository.flush();
-        await tapKey('tab_results');
+        await tapKey('tab_project');
+        await tapKey('calculate_project');
         expect(find.text('86,026.20'), findsOneWidget);
         saved = (await ProjectRepository(store: store).load()).data;
         expect(saved.currentProject.materialPrices['cement'], 40);
@@ -157,6 +158,26 @@ void main() {
         expect(saved.currentProject.work(WorkKind.foundations).quantity, 21);
         expect(saved.projects.last.work(WorkKind.foundations).quantity, 20);
         expect(saved.projects.last.materialPrices['cement'], 40);
+
+        await tapKey('project_picker');
+        await tapKey('full_example_project');
+        saved = (await ProjectRepository(store: store).load()).data;
+        final fullId = saved.currentProjectId;
+        await tapKey('tab_prices');
+        await enter('$fullId:profit_percentage', '١٠');
+        await tapKey('tab_project');
+        await tapKey('calculate_project');
+        expect(find.text('162,724.87'), findsOneWidget);
+        await tapKey('tab_prices');
+        await enter('$fullId:profit_percentage', '١٢');
+        await tapKey('tab_results');
+        expect(find.byKey(const ValueKey('export_project_pdf')), findsNothing);
+        expect(
+          find.byKey(const ValueKey('recalculate_project')),
+          findsOneWidget,
+        );
+        await tapKey('recalculate_project');
+        expect(find.text('165,683.50'), findsOneWidget);
         expect(tester.takeException(), isNull);
       } finally {
         await tester.pumpWidget(const SizedBox.shrink());

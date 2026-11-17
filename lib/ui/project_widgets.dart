@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../domain/numbers.dart';
 import '../project/engine.dart';
+import '../project/models.dart';
 import 'app_theme.dart';
 
 String money(num value) {
@@ -15,8 +16,27 @@ String money(num value) {
 String statusLabel(WorkStatus status) => switch (status) {
   WorkStatus.calculated => 'محسوب',
   WorkStatus.needsData => 'يحتاج بيانات',
-  WorkStatus.excluded => 'مستبعد',
-  WorkStatus.noModel => 'بانتظار النموذج',
+  WorkStatus.excluded => 'غير مطلوب',
+  WorkStatus.noModel => 'يحتاج نموذجًا',
+  WorkStatus.zeroQuantity => 'لا توجد كمية',
+};
+
+String measure(num value) {
+  if (!value.isFinite) return '—';
+  final parts = value.toStringAsFixed(6).split('.');
+  if (parts.length != 2) return inputNumber(value);
+  final whole = parts.first.replaceAllMapped(
+    RegExp(r'\B(?=(\d{3})+(?!\d))'),
+    (_) => ',',
+  );
+  final fraction = parts.last.replaceFirst(RegExp(r'0+$'), '');
+  return fraction.isEmpty ? whole : '$whole.$fraction';
+}
+
+String quantitySourceLabel(QuantitySource source) => switch (source) {
+  QuantitySource.workQuantity => 'مقدار البند',
+  QuantitySource.roofArea => 'مساحة السقف',
+  QuantitySource.roofBeamLength => 'أطوال الكمرات',
 };
 
 /// Controllers belong to fields, not builds. The edit text comes from the
@@ -29,6 +49,7 @@ class NumberInput extends StatefulWidget {
     required this.onChanged,
     this.semanticLabel,
     this.error,
+    this.suffixText,
     this.enabled = true,
     this.integer = false,
   });
@@ -37,6 +58,7 @@ class NumberInput extends StatefulWidget {
   final ValueChanged<String> onChanged;
   final String? semanticLabel;
   final String? error;
+  final String? suffixText;
   final bool enabled;
   final bool integer;
   @override
@@ -52,9 +74,20 @@ class _NumberInputState extends State<NumberInput> {
   void didUpdateWidget(NumberInput oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.text != _controller.text) {
+      final selection = _controller.selection;
       _controller.value = TextEditingValue(
         text: widget.text,
-        selection: TextSelection.collapsed(offset: widget.text.length),
+        selection: _focus.hasFocus && selection.isValid
+            ? TextSelection(
+                baseOffset: selection.baseOffset.clamp(0, widget.text.length),
+                extentOffset: selection.extentOffset.clamp(
+                  0,
+                  widget.text.length,
+                ),
+                affinity: selection.affinity,
+                isDirectional: selection.isDirectional,
+              )
+            : TextSelection.collapsed(offset: widget.text.length),
       );
     }
   }
@@ -81,6 +114,7 @@ class _NumberInputState extends State<NumberInput> {
         labelText: widget.label,
         floatingLabelBehavior: FloatingLabelBehavior.always,
         errorText: widget.error,
+        suffixText: widget.suffixText,
         errorMaxLines: 3,
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 10,

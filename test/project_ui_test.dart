@@ -173,22 +173,45 @@ void main() {
   );
 
   testWidgets(
-    'project results use current drafts and Arabic prices survive tab changes',
+    'explicit calculations use the current draft and prevent stale PDF export',
     (tester) async {
       final store = MemoryStore(project: createExampleProject(id: 'example'));
       await tester.pumpWidget(
         HasrApp(repository: ProjectRepository(store: store)),
       );
       await tester.pumpAndSettle();
+      final results = find.byKey(const ValueKey('tab_results'));
+      final calculate = find.byKey(const ValueKey('calculate_project'));
+      final update = find.byKey(const ValueKey('recalculate_project'));
+      final export = find.byKey(const ValueKey('export_project_pdf'));
+      await tester.tap(results);
+      await tester.pumpAndSettle();
+      expect(find.text('لم يُحسب المشروع بعد'), findsOneWidget);
+      expect(export, findsNothing);
+      await tester.tap(update);
+      await tester.pumpAndSettle();
+      await tester.tap(calculate);
+      await tester.pumpAndSettle();
+      expect(find.text('86,364.20'), findsOneWidget);
+      expect(tester.widget<OutlinedButton>(export).onPressed, isNotNull);
+
+      await tester.tap(find.byKey(const ValueKey('tab_project')));
+      await tester.pumpAndSettle();
       final quantity = field('example:quantity:foundations');
       await reveal(tester, quantity);
       await tester.enterText(quantity, '');
       await tester.pumpAndSettle();
       expect(tester.widget<TextField>(quantity).controller!.text, '');
-      await tester.tap(find.byKey(const ValueKey('tab_results')));
+      await tester.tap(results);
+      await tester.pumpAndSettle();
+      expect(find.text('الحسبة تحتاج تحديثًا'), findsOneWidget);
+      expect(find.text('86,364.20'), findsNothing);
+      expect(export, findsNothing);
+      await tester.tap(update);
       await tester.pumpAndSettle();
       expect(find.text('68,564.20'), findsOneWidget);
-      expect(find.text('86,364.20'), findsNothing);
+      expect(find.text('حصر جزئي — توجد بنود غير مكتملة'), findsOneWidget);
+
       await tester.tap(find.byKey(const ValueKey('tab_prices')));
       await tester.pumpAndSettle();
       final cement = field('example:price:cement');
@@ -197,6 +220,10 @@ void main() {
       await tester.pumpAndSettle();
       expect(tester.widget<TextField>(cement).controller!.text, '٤٠');
       expect(tester.widget<TextField>(cement).focusNode!.hasFocus, isTrue);
+      await tester.tap(results);
+      await tester.pumpAndSettle();
+      expect(find.text('الحسبة تحتاج تحديثًا'), findsOneWidget);
+      expect(export, findsNothing);
       await tester.tap(find.byKey(const ValueKey('tab_project')));
       await tester.pumpAndSettle();
       expect(tester.widget<TextField>(quantity).controller!.text, '');
@@ -207,6 +234,97 @@ void main() {
         store.saved.currentProject.work(WorkKind.foundations).quantity,
         20,
       );
+      await tester.pumpWidget(
+        HasrApp(repository: ProjectRepository(store: store)),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(results);
+      await tester.pumpAndSettle();
+      expect(find.text('الحسبة تحتاج تحديثًا'), findsOneWidget);
+      expect(export, findsNothing);
+    },
+  );
+
+  testWidgets(
+    'positive edits enter the scope, exclusion retains values, and zero is explicit',
+    (tester) async {
+      final store = MemoryStore(project: createProject(id: 'blank'));
+      await tester.pumpWidget(
+        HasrApp(repository: ProjectRepository(store: store)),
+      );
+      await tester.pumpAndSettle();
+      final quantity = field('blank:quantity:foundations');
+      final include = find.byKey(const ValueKey('include_foundations'));
+      final calculate = find.byKey(const ValueKey('calculate_project'));
+      expect(tester.widget<TextField>(quantity).controller!.text, '');
+      await reveal(tester, quantity);
+      await tester.enterText(quantity, '٢');
+      await tester.pumpAndSettle();
+      expect(find.text('جاهز للحساب'), findsOneWidget);
+      await reveal(tester, include);
+      await tester.tap(include);
+      await tester.pumpAndSettle();
+      expect(quantity, findsNothing);
+      expect(find.text('إضافة للحصر'), findsOneWidget);
+      await tester.tap(calculate);
+      await tester.pumpAndSettle();
+      expect(store.saved.currentProject.work(WorkKind.foundations).quantity, 2);
+      expect(
+        store.saved.currentProject
+            .work(WorkKind.foundations)
+            .explicitlyExcluded,
+        isTrue,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('tab_project')));
+      await tester.pumpAndSettle();
+      await reveal(tester, include);
+      await tester.tap(include);
+      await tester.pumpAndSettle();
+      expect(tester.widget<TextField>(quantity).controller!.text, '٢');
+      await tester.tap(calculate);
+      await tester.pumpAndSettle();
+      expect(find.text('1,780.00'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('tab_project')));
+      await tester.pumpAndSettle();
+      await reveal(tester, quantity);
+      await tester.enterText(quantity, '٠');
+      await tester.pumpAndSettle();
+      expect(find.text('لا توجد كمية'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'roof keeps area separate from beam length including an entered zero',
+    (tester) async {
+      final store = MemoryStore(project: createProject(id: 'blank'));
+      await tester.pumpWidget(
+        HasrApp(repository: ProjectRepository(store: store)),
+      );
+      await tester.pumpAndSettle();
+      final area = field('blank:quantity:roof');
+      final beams = field('blank:roof_beam_length');
+      final calculate = find.byKey(const ValueKey('calculate_project'));
+      await reveal(tester, area);
+      await tester.enterText(area, '٢٠٠');
+      await tester.pumpAndSettle();
+      expect(tester.widget<TextField>(beams).controller!.text, '');
+      await tester.tap(calculate);
+      await tester.pumpAndSettle();
+      final missing = find.textContaining('البنود غير المكتملة:');
+      expect(tester.widget<Text>(missing).data, contains('السقف'));
+
+      await tester.tap(find.byKey(const ValueKey('tab_project')));
+      await tester.pumpAndSettle();
+      await reveal(tester, beams);
+      await tester.enterText(beams, '٠');
+      await tester.pumpAndSettle();
+      expect(tester.widget<TextField>(area).controller!.text, '٢٠٠');
+      await tester.tap(calculate);
+      await tester.pumpAndSettle();
+      expect(find.text('46,097.50'), findsOneWidget);
+      expect(tester.widget<Text>(missing).data, isNot(contains('السقف')));
     },
   );
 
@@ -218,7 +336,7 @@ void main() {
         HasrApp(repository: ProjectRepository(store: store)),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('القواعد').first);
+      await tester.tap(find.byKey(const ValueKey('work_foundations')));
       await tester.pumpAndSettle();
       final override = field('example:override:foundations:concrete');
       await reveal(tester, override);
@@ -319,7 +437,7 @@ void main() {
     expect(find.text('open'), findsOneWidget);
   });
 
-  testWidgets('roof starts empty and accepts user defined material rows', (
+  testWidgets('a custom roof line accepts a chosen beam length source', (
     tester,
   ) async {
     WorkModel? saved;
@@ -358,6 +476,12 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('خرسانة مسلحة'));
     await tester.pumpAndSettle();
+    final source = find.byKey(const ValueKey('roof_source_0'));
+    await reveal(tester, source);
+    await tester.tap(source);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('أطوال الكمرات').last);
+    await tester.pumpAndSettle();
     final coefficient = find.byKey(const ValueKey('coefficient_0'));
     await reveal(tester, coefficient);
     await tester.enterText(coefficient, '٠٫٢');
@@ -369,6 +493,7 @@ void main() {
     expect(saved!.inputUnit, QuantityUnit.area);
     expect(saved!.rows.single.coefficient, .2);
     expect(saved!.rows.single.materialId, 'concrete');
+    expect(saved!.rows.single.quantitySource, QuantitySource.roofBeamLength);
     expect(saved!.isBuiltIn, isFalse);
   });
 }

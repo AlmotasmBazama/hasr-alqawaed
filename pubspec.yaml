@@ -1,7 +1,7 @@
 name: hasr_alqawaed
 description: حصر عربي محلي لكميات وتكاليف أعمال المشروع مع نماذج وتقارير PDF.
 publish_to: none
-version: 2.0.0+2
+version: 3.0.0+3
 
 environment:
   sdk: ^3.11.5

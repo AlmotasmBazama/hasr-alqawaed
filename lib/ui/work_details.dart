@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 
-import '../domain/numbers.dart';
 import '../project/controller.dart';
 import '../project/engine.dart';
 import '../project/models.dart';
@@ -45,35 +44,22 @@ class WorkDetails extends StatelessWidget {
     builder: (context, _) {
       final project = controller.project;
       final entry = project.work(kind);
-      final result = controller.result.work(kind);
+      final result = controller.needsRecalculation
+          ? null
+          : controller.calculatedResult?.work(kind);
       final model = entry.model;
       final models = controller.modelsFor(kind);
       return Scaffold(
-        appBar: AppBar(title: Text(kind.label)),
+        appBar: AppBar(title: const Text('تفاصيل النموذج')),
         body: SafeArea(
           child: ProjectBody(
             children: [
               if (controller.saving) const LinearProgressIndicator(),
-              SurfaceCard(
-                child: SwitchListTile.adaptive(
-                  key: const ValueKey('include_work'),
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text(
-                    'إدراج البند في المشروع',
-                    style: TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  subtitle: Text(
-                    entry.included
-                        ? 'داخل نطاق الحصر'
-                        : 'مستبعد من الإجمالي والتجميع',
-                  ),
-                  value: entry.included,
-                  onChanged: controller.editable
-                      ? (value) => controller.include(kind, value)
-                      : null,
+              SectionHeading(kind.label),
+              if (entry.explicitlyExcluded)
+                const Notice(
+                  'هذا البند غير مطلوب. يمكن إضافته للحصر من الكميات.',
                 ),
-              ),
-              const SectionHeading('النموذج ومعاملات الحصر'),
               SurfaceCard(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -153,27 +139,19 @@ class WorkDetails extends StatelessWidget {
                 ),
               ),
               if (model != null) ...[
-                const SizedBox(height: 22),
-                NumberInput(
-                  key: ValueKey('${project.id}:detail_quantity:${kind.name}'),
-                  text: controller.draft(
-                    'quantity:${kind.name}',
-                    controller.savedProject.work(kind).quantity,
+                if (kind == WorkKind.roof)
+                  const Notice(
+                    'هذه معاملات حصر كمية. لا تُستخدم للتحقق من التصميم الإنشائي أو سلامة التسليح.',
                   ),
-                  label: 'مقدار البند (${model.inputUnit.label})',
-                  enabled: controller.editable,
-                  integer: kind.integerQuantity,
-                  error: entry.quantity == null
-                      ? 'أدخل ${kind.integerQuantity ? 'عددًا صحيحًا' : 'كمية'} غير سالبة'
-                      : null,
-                  onChanged: (value) => controller.quantity(kind, value),
-                ),
+                if (kind == WorkKind.roof &&
+                    model.requiresRoofBeamLength &&
+                    (entry.quantity == null ||
+                        (entry.quantity! > 0 && entry.roofBeamLength == null)))
+                  const Notice(
+                    'أدخل مساحة السقف وأطوال الكمرات في واجهة الكميات.',
+                  ),
                 if (model.rows.any((row) => row.reviewBasis))
                   const Notice('تقدير مبدئي — توجد وحدات خدمات قابلة للمراجعة'),
-                if (result.status != WorkStatus.calculated)
-                  Notice(
-                    '${statusLabel(result.status)} — هذا البند غير مشمول في الإجمالي حاليًا.',
-                  ),
                 const SectionHeading('المواد'),
                 for (final row in model.rows.where((row) => row.isMaterial))
                   _line(context, entry, result, row),
@@ -182,18 +160,11 @@ class WorkDetails extends StatelessWidget {
                   _line(context, entry, result, row),
               ],
               const SizedBox(height: 20),
-              if (result.cost != null)
+              if (result?.cost != null)
                 TotalCard(
-                  value: result.cost!,
-                  title: 'إجمالي ${kind.label}',
+                  value: result!.cost!,
+                  title: 'تكلفة ${kind.label} قبل الربح',
                   large: false,
-                )
-              else
-                SurfaceCard(
-                  child: DetailPair(
-                    'إجمالي ${kind.label}',
-                    '— ${statusLabel(result.status)}',
-                  ),
                 ),
             ],
           ),
@@ -205,15 +176,20 @@ class WorkDetails extends StatelessWidget {
   Widget _line(
     BuildContext context,
     WorkEntry entry,
-    WorkResult result,
+    WorkResult? result,
     ModelRow row,
   ) {
-    final line = result.lines
+    final line = result?.lines
         .where((line) => line.row.id == row.id)
         .firstOrNull;
     final price = controller.price(entry, row);
     final hasOverride = controller.hasOverride(kind, row);
     final raw = controller.draft('override:${kind.name}:${row.id}', price);
+    final sourceUnit = switch (row.quantitySource) {
+      QuantitySource.workQuantity => entry.model!.inputUnit,
+      QuantitySource.roofArea => QuantityUnit.area,
+      QuantitySource.roofBeamLength => QuantityUnit.linear,
+    };
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: SurfaceCard(
@@ -225,9 +201,20 @@ class WorkDetails extends StatelessWidget {
               style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
             ),
             Text(
-              '${formatNumber(row.coefficient)} ${row.sourceUnit?.label ?? row.unit.label} لكل ${entry.model!.inputUnit.label} ÷ ${formatNumber(row.divisor)}',
+              '${measure(row.coefficient)} ${row.sourceUnit?.label ?? row.unit.label} لكل ${sourceUnit.label}'
+              '${row.divisor == 1 ? '' : ' ÷ ${measure(row.divisor)}'} ← ${row.unit.label}',
               style: const TextStyle(color: secondaryText, fontSize: 13),
             ),
+            if (kind == WorkKind.roof)
+              Text(
+                'يُحسب حسب: ${quantitySourceLabel(row.quantitySource)}',
+                style: const TextStyle(color: secondaryText, fontSize: 13),
+              ),
+            if (kind == WorkKind.roof && !row.isMaterial && row.divisor == 4)
+              const Text(
+                'قسمة المساحة على 4 معامل للتسعير في هذا النموذج.',
+                style: TextStyle(color: secondaryText, fontSize: 12),
+              ),
             if (row.reviewBasis)
               const Padding(
                 padding: EdgeInsets.only(top: 8),
@@ -236,15 +223,14 @@ class WorkDetails extends StatelessWidget {
                   style: TextStyle(color: Color(0xFF86531A), fontSize: 12),
                 ),
               ),
-            DetailPair(
-              'الكمية',
-              line == null
-                  ? '—'
-                  : '${formatNumber(line.quantity)} ${line.unit.label}',
-            ),
+            if (line != null)
+              DetailPair(
+                'الكمية المسعّرة',
+                '${measure(line.quantity)} ${line.unit.label}',
+              ),
             if (line != null && row.divisor != 1)
               Text(
-                'قبل التحويل: ${formatNumber(line.rawQuantity)} ${row.sourceUnit?.label ?? row.unit.label}',
+                'قبل التحويل: ${measure(line.rawQuantity)} ${row.sourceUnit?.label ?? row.unit.label}',
                 style: const TextStyle(fontSize: 12, color: secondaryText),
               ),
             const SizedBox(height: 12),
@@ -274,11 +260,8 @@ class WorkDetails extends StatelessWidget {
                   style: TextStyle(color: secondaryText, fontSize: 12),
                 ),
               ),
-            DetailPair(
-              'تكلفة السطر',
-              line == null ? '—' : '${money(line.cost)} د.ل',
-              bold: true,
-            ),
+            if (line != null)
+              DetailPair('تكلفة السطر', '${money(line.cost)} د.ل', bold: true),
           ],
         ),
       ),

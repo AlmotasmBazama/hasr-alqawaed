@@ -41,10 +41,10 @@ void main() {
       expect(result.materials.length, 7);
       expect(result.calculatedCount, 6);
       expect(result.work(WorkKind.roof).cost, isNull);
-      expect(result.work(WorkKind.roof).status, WorkStatus.noModel);
+      expect(result.work(WorkKind.roof).status, WorkStatus.excluded);
       expect(result.notes, contains('السقف غير مشمول في الإجمالي'));
       expect(result.hasReviewableServices, isTrue);
-      expect(result.isPartial, isTrue);
+      expect(result.isPartial, isFalse);
     },
   );
 
@@ -214,7 +214,7 @@ void main() {
       );
       expect(excluded.work(WorkKind.roof).status, WorkStatus.excluded);
       expect(excluded.work(WorkKind.roof).cost, isNull);
-      expect(excluded.notes, isNot(contains('السقف غير مشمول في الإجمالي')));
+      expect(excluded.notes, contains('السقف غير مشمول في الإجمالي'));
     },
   );
 
@@ -238,7 +238,10 @@ void main() {
   );
 
   test('zero prices and coefficients are valid; zero divisors are not', () {
-    final project = createProject();
+    final blank = createProject();
+    final project = blank.updateWork(
+      blank.work(WorkKind.foundations).copyWith(included: true, quantity: 20),
+    );
     final foundation = project.work(WorkKind.foundations);
     final zeroPrice = calculateProject(
       project.copyWith(

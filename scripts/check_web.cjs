@@ -1,58 +1,307 @@
-// Release browser QA in isolated storage; no personal browser profile is used.
+// Browser QA. All storage and file sharing are isolated from real user data.
 const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const { chromium } = require(process.env.HASR_PLAYWRIGHT_PATH || 'playwright');
+
 const url = process.argv[2];
-const prefix = process.argv[3] || 'local-v2';
+const prefix = process.argv[3] || 'local-v3';
 if (!url) throw new Error('Usage: node scripts/check_web.cjs <url> [prefix]');
 const output = path.resolve(__dirname, '..', 'output', 'web-checks');
-fs.mkdirSync(output, {recursive:true});
+fs.mkdirSync(output, { recursive: true });
+
 const legacy = {
-  version:1,
-  customModels:[{id:'browser-legacy-model',name:'نموذج سابق محفوظ',length:1.25,width:1.4,height:.55,concretePerFoundation:1,steel14BarsPerFoundation:2,steel14BarsPerQuintal:5,steel8BarsPerFoundation:.5,steel8BarsPerQuintal:10}],
-  selectedModelId:'browser-legacy-model',
-  inputs:{count:10,prices:{concrete:560,steel14:520,steel8:600,carpenter:70,steelWorker:30,casting:60}},
+  version: 1,
+  customModels: [{
+    id: 'browser-legacy-model', name: 'نموذج سابق محفوظ',
+    length: 1.25, width: 1.4, height: .55, concretePerFoundation: 1,
+    steel14BarsPerFoundation: 2, steel14BarsPerQuintal: 5,
+    steel8BarsPerFoundation: .5, steel8BarsPerQuintal: 10,
+  }],
+  selectedModelId: 'browser-legacy-model',
+  inputs: {
+    count: 10,
+    prices: { concrete: 560, steel14: 520, steel8: 600, carpenter: 70, steelWorker: 30, casting: 60 },
+  },
 };
-(async()=>{
- const browser=await chromium.launch({headless:true,executablePath:process.env.HASR_CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe'});
- const context=await browser.newContext({viewport:{width:1280,height:900},acceptDownloads:true});
- await context.addInitScript(data=>{if(!localStorage.getItem('hasr_qa_seeded')){localStorage.setItem('hasr_alqawaed_state_v1',JSON.stringify(JSON.stringify(data)));localStorage.setItem('hasr_qa_seeded','true');}},legacy);
- const page=await context.newPage(); page.setDefaultTimeout(60000); page.setDefaultNavigationTimeout(120000);
- const errors=[],consoleErrors=[],failedRequests=[],badResponses=[];
- page.on('pageerror',e=>errors.push(e.message));
- page.on('console',m=>{if(m.type()==='error')consoleErrors.push(m.text());});
- page.on('requestfailed',r=>failedRequests.push({url:r.url(),error:r.failure()?.errorText}));
- page.on('response',r=>{if(r.status()>=400)badResponses.push({url:r.url(),status:r.status()});});
- const snapshot=()=>page.locator('body').ariaSnapshot();
- async function enable(){const trigger=page.locator('flt-semantics-placeholder');await trigger.waitFor({state:'attached',timeout:90000});await trigger.evaluate(e=>e.click());await page.getByRole('heading',{name:'حصر المشروع',exact:true}).waitFor();await page.waitForTimeout(300);}
- async function tab(name){await page.getByRole('tab',{name,exact:true}).press('Enter');await page.waitForTimeout(250);}
- async function enter(locator,value){await locator.focus();await page.waitForTimeout(150);await page.keyboard.press('Control+A');await page.keyboard.insertText(value);await page.waitForTimeout(600);}
- async function state(){return page.evaluate(()=>JSON.parse(JSON.parse(localStorage.getItem('hasr_project_state_v2'))));}
- async function download(label){await page.getByRole('button',{name:'تنزيل PDF',exact:true}).press('Enter');await page.getByRole('alertdialog').waitFor({timeout:25000});const [file]=await Promise.all([page.waitForEvent('download'),page.getByRole('alertdialog').getByRole('button',{name:'تنزيل PDF',exact:true}).press('Enter')]);assert.equal(await file.failure(),null);const dest=path.join(output,`${prefix}-${label}.pdf`);await file.saveAs(dest);assert.equal(fs.readFileSync(dest).subarray(0,5).toString(),'%PDF-');await page.getByRole('alertdialog').waitFor({state:'detached'});return dest;}
- async function top(){await page.mouse.move(180,250);await page.mouse.wheel(0,-12000);await page.waitForTimeout(350);}
- try{
-  await page.goto(url,{waitUntil:'domcontentloaded'});await enable();
-  let saved=await state();assert.equal(saved.projects.length,1);assert.equal(saved.projects[0].name,'مشروعي السابق');assert.equal(saved.customModels[0].id,'browser-legacy-model');assert.equal(saved.projects[0].works.filter(w=>w.included).length,1);assert.ok((await snapshot()).includes('9,580.00'));
-  const original=await page.evaluate(()=>JSON.parse(localStorage.getItem('hasr_alqawaed_state_v1')));assert.deepEqual(JSON.parse(original),legacy);assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('hasr_project_v1_original_backup'))),original);
-  await page.getByRole('button',{name:'اختيار مشروع',exact:true}).press('Enter');await page.getByRole('button',{name:/^إضافة «مثال الأوراق»/}).press('Enter');await page.waitForTimeout(400);
-  saved=await state();const exampleId=saved.currentProjectId;assert.equal(saved.projects.length,2);assert.ok((await snapshot()).includes('86,364.20'));
-  await tab('النتائج');assert.ok((await snapshot()).includes('66,656.20'));assert.ok((await snapshot()).includes('19,708.00'));assert.ok((await snapshot()).includes('السقف غير مشمول في الإجمالي'));
-  await page.screenshot({path:path.join(output,`${prefix}-desktop-results.png`)});
-  const examplePdf=await download('example');
-  await tab('الأسعار');await enter(page.getByRole('textbox',{name:/^سعر أسمنت بالنقل/}),'٤٠');await tab('النتائج');assert.ok((await snapshot()).includes('86,026.20'));
-  await page.reload({waitUntil:'domcontentloaded'});await enable();await tab('النتائج');assert.ok((await snapshot()).includes('86,026.20'));saved=await state();assert.equal(saved.projects.find(p=>p.id!==exampleId).materialPrices.cement,42);
-  await tab('المشروع');await enter(page.getByRole('textbox',{name:/^كمية القواعد/}),'');await tab('النتائج');assert.ok((await snapshot()).includes('68,226.20'));assert.ok((await snapshot()).includes('القواعد: يحتاج بيانات'));
-  saved=await state();assert.equal(saved.projects.find(p=>p.id===exampleId).works.find(w=>w.kind==='foundations').quantity,20);const partialPdf=await download('partial');
-  await tab('المشروع');await enter(page.getByRole('textbox',{name:/^كمية القواعد/}),'٢٠');await tab('الأسعار');await enter(page.getByRole('textbox',{name:/^سعر أسمنت بالنقل/}),'42');
-  await page.setViewportSize({width:360,height:740});await tab('المشروع');await top();await page.screenshot({path:path.join(output,`${prefix}-mobile-project.png`)});
-  await tab('الأسعار');await top();await page.screenshot({path:path.join(output,`${prefix}-mobile-prices.png`)});
-  await tab('النتائج');await top();await page.screenshot({path:path.join(output,`${prefix}-mobile-results.png`)});const mobilePdf=await download('mobile');
-  await tab('المشروع');await page.getByRole('button',{name:/^الميدة نموذج/}).press('Enter');await page.getByRole('button',{name:'تعديل الثوابت',exact:true}).press('Enter');
-  await enter(page.getByRole('textbox',{name:'اسم النموذج',exact:true}),'نموذج ميدة الويب');await enter(page.getByRole('textbox',{name:'الكمية لكل متر طولي',exact:true}).first(),'٠٫١');await page.getByRole('button',{name:'حفظ النموذج',exact:true}).press('Enter');await page.getByRole('heading',{name:'الميدة',exact:true}).waitFor();await page.waitForTimeout(350);
-  saved=await state();const beam=saved.projects.find(p=>p.id===exampleId).works.find(w=>w.kind==='tieBeam');assert.equal(beam.model.name,'نموذج ميدة الويب');assert.equal(beam.model.rows[0].coefficient,.1);assert.equal(saved.customModels.filter(m=>m.id===beam.model.id).length,1);
-  await page.reload({waitUntil:'domcontentloaded'});await enable();await tab('النتائج');assert.ok((await snapshot()).includes('87,820.20'));saved=await state();assert.equal(saved.projects.length,2);assert.equal(saved.projects[0].works[0].model.id,'browser-legacy-model');
-  assert.deepEqual(errors,[]);assert.deepEqual(consoleErrors,[]);assert.deepEqual(failedRequests,[]);assert.deepEqual(badResponses,[]);
-  const result={url,passed:true,examplePdf,partialPdf,mobilePdf,checks:['v1MigrationWithBackup','example86364.20','materials66656.20','services19708','cement40Gives86026.20','projectIsolation','reloadPersistence','blankQuantityPartial68226.20','savedValidDraftRetained','desktopMobilePdfDownloads','mobile360Layout','customBeamModel87820.20','roofPending'],errors,consoleErrors,failedRequests,badResponses};fs.writeFileSync(path.join(output,`${prefix}-results.json`),JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));
- }catch(error){console.log('Failure state:',await snapshot());await page.screenshot({path:path.join(output,`${prefix}-failure.png`)});fs.writeFileSync(path.join(output,`${prefix}-failure.html`),await page.content());console.log(JSON.stringify({errors,consoleErrors,failedRequests,badResponses},null,2));throw error;}finally{await browser.close();}
-})().catch(e=>{console.error(e);process.exitCode=1;});
+
+const stateKey = 'hasr_project_state_v3';
+const v1Key = 'hasr_alqawaed_state_v1';
+const baseOptions = { viewport: { width: 1280, height: 900 }, acceptDownloads: true };
+const pdfAction = /^(تنزيل|مشاركة) التقرير PDF$/;
+
+async function session(browser, options = baseOptions) {
+  const context = await browser.newContext(options);
+  const page = await context.newPage();
+  page.setDefaultTimeout(15000);
+  page.setDefaultNavigationTimeout(90000);
+
+  const snapshot = () => page.locator('body').ariaSnapshot();
+  const button = name => page.getByRole('button', { name, exact: true });
+  const textbox = name => page.getByRole('textbox', { name });
+  async function enable() {
+    const trigger = page.locator('flt-semantics-placeholder');
+    await trigger.waitFor({ state: 'attached', timeout: 90000 });
+    await trigger.evaluate(el => el.click());
+    await page.getByRole('heading', { name: 'كميات المشروع', exact: true }).waitFor();
+  }
+  async function open(reload = false) {
+    if (reload) await page.reload({ waitUntil: 'domcontentloaded' });
+    else await page.goto(url, { waitUntil: 'domcontentloaded' });
+    await enable();
+  }
+  async function tab(name) {
+    await page.getByRole('tab', { name, exact: true }).press('Enter');
+  }
+  async function scroll(delta) {
+    const viewport = page.viewportSize();
+    await page.mouse.move(Math.round(viewport.width / 2), Math.round(viewport.height * .52));
+    await page.mouse.wheel(0, delta);
+    await page.waitForTimeout(180); // Wait for Flutter to update visible semantics.
+  }
+  async function seek(locator) {
+    for (let i = 0; i < 18; i++) {
+      if (await locator.count() && await locator.first().isVisible()) return locator.first();
+      await scroll(375);
+    }
+    await locator.first().waitFor();
+    return locator.first();
+  }
+  async function enter(locator, value) {
+    await (await seek(locator)).focus();
+    await page.waitForTimeout(175); // Let Flutter attach its editable element.
+    await page.keyboard.press('Control+A');
+    if (value) await page.keyboard.insertText(value);
+    else await page.keyboard.press('Backspace');
+    await page.waitForTimeout(550); // Allow the debounced local write.
+  }
+  async function getState(key = stateKey) {
+    return page.evaluate(k => JSON.parse(JSON.parse(localStorage.getItem(k))), key);
+  }
+  async function includes(value) {
+    for (let i = 0; i < 36; i++) {
+      if ((await snapshot()).includes(value)) return;
+      await page.waitForTimeout(150);
+    }
+    assert.fail('Missing text: ' + value);
+  }
+  async function addSample(full = false) {
+    const before = (await getState()).currentProjectId;
+    await button('اختيار مشروع').press('Enter');
+    await button(full ? /^إضافة «مثال الأوراق بالسقف»/ : /^إضافة «مثال الأوراق»/).press('Enter');
+    await page.waitForFunction(({ key, before }) => {
+      const raw = localStorage.getItem(key);
+      return raw && JSON.parse(JSON.parse(raw)).currentProjectId !== before;
+    }, { key: stateKey, before });
+    await page.getByRole('heading', { name: 'كميات المشروع', exact: true }).waitFor();
+    return (await getState()).currentProjectId;
+  }
+  async function download(label) {
+    await (await seek(button(pdfAction))).press('Enter');
+    const dialog = page.getByRole('alertdialog');
+    await dialog.waitFor({ timeout: 30000 });
+    const [file] = await Promise.all([
+      page.waitForEvent('download'),
+      dialog.getByRole('button', { name: 'تنزيل PDF', exact: true }).press('Enter'),
+    ]);
+    assert.match(file.suggestedFilename(), /^hasr_project_\d{8}_\d{6}\.pdf$/);
+    const dest = path.join(output, prefix + '-' + label + '.pdf');
+    await file.saveAs(dest);
+    assert.equal(await file.failure(), null);
+    assert.equal(fs.readFileSync(dest).subarray(0, 5).toString(), '%PDF-');
+    await dialog.waitFor({ state: 'detached' });
+    return dest;
+  }
+  async function screenshot(name) {
+    await page.screenshot({ path: path.join(output, prefix + '-' + name + '.png') });
+  }
+  return { context, page, open, tab, snapshot, button, textbox, getState, includes, addSample, download, screenshot, seek, enter, scroll };
+}
+
+function logFailures(page, errors) {
+  page.on('pageerror', e => errors.push(e.message));
+  page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+  page.on('response', r => { if (r.status() >= 400) errors.push(r.status() + ' ' + r.url()); });
+  page.on('requestfailed', r => {
+    if (r.failure()?.errorText !== 'net::ERR_ABORTED') errors.push(r.url() + ': ' + r.failure()?.errorText);
+  });
+}
+
+(async () => {
+  const browser = await chromium.launch({
+    headless: true,
+    executablePath: process.env.HASR_CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe',
+  });
+  const checks = [];
+  const errors = [];
+  const s = await session(browser);
+  logFailures(s.page, errors);
+  try {
+    await s.context.addInitScript(({ data, key }) => {
+      if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify(JSON.stringify(data)));
+    }, { data: legacy, key: v1Key });
+    await s.open();
+    const migrated = await s.getState();
+    assert.equal(migrated.version, 3);
+    assert.equal(migrated.projects[0].name, 'مشروعي السابق');
+    assert.equal(migrated.customModels[0].id, 'browser-legacy-model');
+    assert.equal(migrated.projects[0].works.filter(w => w.included).length, 1);
+    assert.equal(migrated.projects[0].profitPercentage, 0);
+    assert.deepEqual(await s.getState(v1Key), legacy);
+    assert.deepEqual(await s.getState('hasr_project_v1_original_backup'), legacy);
+    checks.push('legacyMigrationAndOriginalBackup');
+
+    const old = await s.addSample();
+    await s.tab('النتائج');
+    await s.includes('لم يُحسب المشروع بعد');
+    assert.equal(await s.button(pdfAction).count(), 0);
+    await s.tab('الكميات');
+    await s.button('احسب المشروع').press('Enter');
+    await s.includes('86,364.20');
+    await s.includes('66,656.20');
+    await s.includes('19,708.00');
+    const oldPdf = await s.download('previous-example');
+    await s.tab('الأسعار والربح');
+    await s.enter(s.textbox(/^سعر أسمنت بالنقل/), '٤٠');
+    await s.tab('النتائج');
+    await s.includes('الحسبة تحتاج تحديثًا');
+    assert.equal(await s.button(pdfAction).count(), 0);
+    await s.open(true);
+    await s.tab('النتائج');
+    await s.includes('الحسبة تحتاج تحديثًا');
+    await s.button('تحديث الحسبة').press('Enter');
+    await s.includes('86,026.20');
+    checks.push('previousBaselineAndArabicCementPrice', 'staleCalculationAndPdfGuardSurviveReload');
+
+    const full = await s.addSample(true);
+    assert.notEqual(full, old);
+    await s.tab('الأسعار والربح');
+    await s.enter(s.textbox(/^نسبة الربح المضافة إلى التكلفة/), '١٠');
+    await s.tab('الكميات');
+    await s.button('احسب المشروع').press('Enter');
+    for (const amount of ['162,724.87', '120,723.70', '27,208.00', '147,931.70', '14,793.17']) {
+      await s.includes(amount);
+    }
+    const saved = await s.getState();
+    const fullProject = saved.projects.find(project => project.id === full);
+    const oldProject = saved.projects.find(project => project.id === old);
+    assert.equal(fullProject.profitPercentage, 10);
+    assert.equal(fullProject.materialPrices.cement, 42);
+    assert.equal(oldProject.profitPercentage, 0);
+    assert.equal(oldProject.materialPrices.cement, 40);
+    await s.screenshot('desktop-results');
+    const fullPdf = await s.download('full-example');
+    checks.push('fullRoofAndProfit162724.87', 'pricesAndProfitIndependent', 'desktopPdfDownload');
+
+    await s.page.setViewportSize({ width: 320, height: 640 });
+    await s.open(true);
+    await s.screenshot('mobile-quantities');
+    await s.tab('الأسعار والربح');
+    await s.screenshot('mobile-prices');
+    await s.tab('النتائج');
+    await s.includes('162,724.87');
+    await s.screenshot('mobile-results');
+    const mobilePdf = await s.download('mobile-full-example');
+    await s.tab('الكميات');
+    await s.enter(s.textbox(/^إجمالي أطوال كمرات السقف/), '');
+    await s.button('احسب المشروع').press('Enter');
+    await s.includes('حصر جزئي — توجد بنود غير مكتملة');
+    await s.includes('البنود غير المكتملة: السقف');
+    const partialPdf = await s.download('partial');
+    assert.equal((await s.getState()).projects.length, 3);
+    checks.push('mobile320AndPdf', 'missingRoofBeamLengthRemainsPartial');
+
+    // Confirm the v2 storage path in a distinct browser profile. Strip v3-only
+    // fields to reproduce persisted v2 input, including an old roof selection.
+    const m = await session(browser);
+    logFailures(m.page, errors);
+    const v2 = structuredClone(saved);
+    v2.version = 2;
+    const legacyRoof = {
+      id: 'legacy-roof', kind: 'roof', name: 'سقف قديم مستقل',
+      description: '', inputUnit: 'linear',
+      rows: [{
+        id: 'roof-v2-line', label: 'خرسانة للسقف القديم', materialId: 'concrete',
+        unit: 'volume', sourceUnit: null, coefficient: .1, divisor: 1,
+        defaultPrice: 560, reviewBasis: false,
+      }],
+    };
+    v2.customModels.push(legacyRoof);
+    v2.projects = v2.projects.filter(project => project.id === old);
+    v2.currentProjectId = old;
+    const p = v2.projects[0];
+    const roof = p.works.find(work => work.kind === 'roof');
+    roof.model = legacyRoof;
+    roof.quantity = 77;
+    roof.priceOverrides = { 'roof-v2-line': 555 };
+    delete p.materialPrices.steel6;
+    delete p.materialPrices.hollowBlock;
+    for (const property of ['inputDrafts', 'profitPercentage', 'calculatedProject', 'calculationStale']) delete p[property];
+    for (const work of p.works) {
+      delete work.roofBeamLength;
+      delete work.explicitlyExcluded;
+      for (const row of work.model?.rows ?? []) delete row.quantitySource;
+    }
+    await m.context.addInitScript(data => {
+      const key = 'hasr_project_state_v2';
+      if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify(JSON.stringify(data)));
+    }, v2);
+    await m.open();
+    let updated = await m.getState();
+    assert.deepEqual(await m.getState('hasr_project_v2_original_backup'), v2);
+    const kept = updated.projects[0].works.find(work => work.kind === 'roof');
+    assert.equal(kept.model.id, 'legacy-roof');
+    assert.equal(kept.model.rows[0].quantitySource, 'workQuantity');
+    assert.equal(kept.quantity, 77);
+    assert.equal(kept.explicitlyExcluded, true);
+    assert.equal(kept.priceOverrides['roof-v2-line'], 555);
+    assert.equal(updated.projects[0].materialPrices.cement, 40);
+    await m.open(true);
+    assert.deepEqual(await m.getState(), updated);
+    await m.context.close();
+    checks.push('v2MigrationIdempotentPreservesLegacyRoofAndOverrides');
+
+    const share = await session(browser);
+    logFailures(share.page, errors);
+    await share.context.addInitScript(() => {
+      Object.defineProperty(navigator, 'canShare', {
+        value: ({ files }) => files?.length === 1 && files[0].type === 'application/pdf',
+      });
+      Object.defineProperty(navigator, 'share', {
+        value: async ({ files }) => {
+          window.hasrSharedFile = {
+            name: files[0].name, type: files[0].type,
+            startsWithPdf: (await files[0].slice(0, 5).text()) === '%PDF-',
+          };
+        },
+      });
+    });
+    await share.open();
+    await share.addSample(true);
+    await share.button('احسب المشروع').press('Enter');
+    await (await share.seek(share.button('مشاركة التقرير PDF'))).press('Enter');
+    const dialog = share.page.getByRole('alertdialog');
+    await dialog.getByRole('button', { name: 'مشاركة PDF', exact: true }).press('Enter');
+    await dialog.waitFor({ state: 'detached' });
+    const shared = await share.page.evaluate(() => window.hasrSharedFile);
+    assert.equal(shared.type, 'application/pdf');
+    assert.ok(shared.startsWithPdf);
+    await share.context.close();
+    checks.push('shareCapableBrowserPdfApiWithStub');
+
+    assert.deepEqual(errors, []);
+    const result = { url, passed: true, checks, oldPdf, fullPdf, mobilePdf, partialPdf, errors };
+    fs.writeFileSync(path.join(output, prefix + '-results.json'), JSON.stringify(result, null, 2));
+    console.log(JSON.stringify(result, null, 2));
+  } catch (error) {
+    console.log('Failure state:', await s.snapshot().catch(() => '(not available)'));
+    await s.screenshot('failure').catch(() => {});
+    console.log(JSON.stringify({ checks, errors }, null, 2));
+    throw error;
+  } finally {
+    await browser.close();
+  }
+})().catch(error => {
+  console.error(error);
+  process.exitCode = 1;
+});

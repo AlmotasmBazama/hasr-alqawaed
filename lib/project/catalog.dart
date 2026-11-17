@@ -32,9 +32,23 @@ const materialCatalog = <MaterialDefinition>[
     defaultPrice: 600,
   ),
   MaterialDefinition(
+    id: 'steel6',
+    label: 'حديد قطر 6',
+    specification: 'قطر 6',
+    unit: QuantityUnit.quintal,
+    defaultPrice: 260,
+  ),
+  MaterialDefinition(
     id: 'block20',
     label: 'بلوك 20 سم',
     specification: '20 سم',
+    unit: QuantityUnit.block,
+    defaultPrice: 1.8,
+  ),
+  MaterialDefinition(
+    id: 'hollowBlock',
+    label: 'بلوك هوردي',
+    specification: 'هوردي',
     unit: QuantityUnit.block,
     defaultPrice: 1.8,
   ),
@@ -60,16 +74,20 @@ MaterialDefinition materialById(String id) =>
 ModelRow _material(
   String id,
   double coefficient, {
+  String? rowId,
+  String? label,
   double divisor = 1,
   QuantityUnit? sourceUnit,
+  QuantitySource quantitySource = QuantitySource.workQuantity,
 }) {
   final material = materialById(id);
   return ModelRow(
-    id: id,
-    label: material.label,
+    id: rowId ?? id,
+    label: label ?? material.label,
     materialId: id,
     unit: material.unit,
     sourceUnit: sourceUnit,
+    quantitySource: quantitySource,
     coefficient: coefficient,
     divisor: divisor,
     defaultPrice: material.defaultPrice,
@@ -82,12 +100,18 @@ ModelRow _service(
   QuantityUnit unit,
   double price, {
   double coefficient = 1,
+  double divisor = 1,
+  QuantityUnit? sourceUnit,
+  QuantitySource quantitySource = QuantitySource.workQuantity,
   bool review = false,
 }) => ModelRow(
   id: id,
   label: label,
   unit: unit,
   coefficient: coefficient,
+  divisor: divisor,
+  sourceUnit: sourceUnit,
+  quantitySource: quantitySource,
   defaultPrice: price,
   reviewBasis: review,
 );
@@ -118,6 +142,17 @@ WorkModel convertFoundationModel(legacy.FoundationModel model) => WorkModel(
     _service('casting', 'صب', QuantityUnit.foundation, 60),
   ],
 );
+
+const roofModelId = 'builtin-roof-25cm-1';
+const roofStirrupsRowId = 'steel8-stirrups';
+const roofArea = QuantitySource.roofArea;
+const roofBeamLength = QuantitySource.roofBeamLength;
+const roofLaborBasisNote =
+    'القسمة على 4 في نجارة السقف وحدادته معامل تسعير خاص بالنموذج من الورقة، ولا يتغيّر بتغيير وصف السمك.';
+const roofCorrectionNote =
+    'تم تصحيح حاصل ضرب سطر الكانات من 5,040 إلى 5,070، مع الإبقاء على الكمية والسعر الواردين في الورقة.';
+const roofScopeNote =
+    'معاملات السقف لأغراض حصر الكميات والتكلفة؛ لا تُعد تصميمًا إنشائيًا أو تحققًا من سلامة التسليح.';
 
 final List<WorkModel> builtInModels = List.unmodifiable([
   convertFoundationModel(legacy.FoundationModel.builtIn),
@@ -198,6 +233,76 @@ final List<WorkModel> builtInModels = List.unmodifiable([
       _service('stocking', 'عامل تشوين', QuantityUnit.linear, 10),
     ],
   ),
+  WorkModel(
+    id: roofModelId,
+    kind: WorkKind.roof,
+    name: 'سقف سمك 25 سم — نموذج 1',
+    description: 'سمك 25 سم. $roofLaborBasisNote $roofScopeNote',
+    inputUnit: QuantityUnit.area,
+    rows: [
+      _material('concrete', .25, quantitySource: roofArea),
+      _material(
+        'steel14',
+        1,
+        label: 'حديد قطر 14 للكمرات',
+        divisor: 6.5,
+        sourceUnit: QuantityUnit.bar,
+        quantitySource: roofBeamLength,
+      ),
+      _material(
+        'steel8',
+        1.3,
+        rowId: roofStirrupsRowId,
+        label: 'حديد قطر 8 للكانات',
+        divisor: 20,
+        sourceUnit: QuantityUnit.bar,
+        quantitySource: roofBeamLength,
+      ),
+      _material(
+        'steel8',
+        1,
+        rowId: 'steel8-mesh',
+        label: 'حديد قطر 8 فرش وغطاء',
+        divisor: 20,
+        sourceUnit: QuantityUnit.bar,
+        quantitySource: roofArea,
+      ),
+      _material(
+        'steel6',
+        1.5,
+        label: 'حديد قطر 6 للأعصاب',
+        divisor: 32,
+        sourceUnit: QuantityUnit.bar,
+        quantitySource: roofArea,
+      ),
+      _material('hollowBlock', 6, quantitySource: roofArea),
+      _service(
+        'roof25-carpenter',
+        'نجار السقف',
+        QuantityUnit.volume,
+        70,
+        divisor: 4,
+        sourceUnit: QuantityUnit.area,
+        quantitySource: roofArea,
+      ),
+      _service(
+        'roof25-steel-worker',
+        'حداد السقف',
+        QuantityUnit.volume,
+        40,
+        divisor: 4,
+        sourceUnit: QuantityUnit.area,
+        quantitySource: roofArea,
+      ),
+      _service(
+        'roof25-casting',
+        'صب السقف',
+        QuantityUnit.area,
+        10,
+        quantitySource: roofArea,
+      ),
+    ],
+  ),
 ]);
 
 WorkModel? defaultModel(WorkKind kind) {
@@ -225,8 +330,8 @@ Project createProject({
     for (final kind in WorkKind.values)
       WorkEntry(
         kind: kind,
-        included: kind == WorkKind.foundations,
-        quantity: kind == WorkKind.foundations ? 20 : null,
+        included: false,
+        explicitlyExcluded: false,
         model: defaultModel(kind),
       ),
   ],
@@ -255,7 +360,66 @@ Project createExampleProject({String? id}) {
     isExample: true,
     works: [
       for (final work in project.works)
-        work.copyWith(included: true, quantity: quantities[work.kind]),
+        work.copyWith(
+          included: quantities.containsKey(work.kind),
+          quantity: quantities[work.kind],
+        ),
+    ],
+  );
+}
+
+Project createFullExampleProject({String? id}) {
+  final project = createExampleProject(id: id);
+  return project
+      .updateWork(
+        project
+            .work(WorkKind.roof)
+            .copyWith(included: true, quantity: 200, roofBeamLength: 130),
+      )
+      .copyWith(name: 'مثال الأوراق مع السقف');
+}
+
+/// Adds only absent keys and a roof option for entries without a selection.
+/// No prior input becomes active merely because it has a stored quantity.
+ProjectState migrateProjectStateV2(ProjectState previous) {
+  final roof = defaultModel(WorkKind.roof)!;
+  // A legacy roof model with a missing shared price still uses its row's
+  // default. Seeding a colliding key would silently change that model's cost.
+  final legacyServiceKeys = {
+    for (final model in [
+      ...previous.customModels,
+      for (final project in previous.projects)
+        ?project.work(WorkKind.roof).model,
+    ])
+      if (model.kind == WorkKind.roof)
+        for (final row in model.rows)
+          if (!row.isMaterial) servicePriceKey(WorkKind.roof, row),
+  };
+  return previous.copyWith(
+    projects: [
+      for (final project in previous.projects)
+        project
+            .updateWork(
+              project.work(WorkKind.roof).model == null
+                  ? project.work(WorkKind.roof).copyWith(model: roof)
+                  : project.work(WorkKind.roof),
+            )
+            .copyWith(
+              materialPrices: {
+                'steel6': materialById('steel6').defaultPrice,
+                'hollowBlock': materialById('hollowBlock').defaultPrice,
+                ...project.materialPrices,
+              },
+              servicePrices: {
+                for (final row in roof.rows)
+                  if (!row.isMaterial &&
+                      !legacyServiceKeys.contains(
+                        servicePriceKey(WorkKind.roof, row),
+                      ))
+                    servicePriceKey(WorkKind.roof, row): row.defaultPrice,
+                ...project.servicePrices,
+              },
+            ),
     ],
   );
 }
@@ -271,7 +435,11 @@ ProjectState migrateLegacyState(legacy.AppData data) {
       .updateWork(
         project
             .work(WorkKind.foundations)
-            .copyWith(quantity: data.inputs.count.toDouble(), model: selected),
+            .copyWith(
+              included: true,
+              quantity: data.inputs.count.toDouble(),
+              model: selected,
+            ),
       )
       .copyWith(
         materialPrices: {

@@ -16,6 +16,16 @@ enum QuantityUnit {
   final String shortLabel;
 }
 
+/// Identifies the measured input that feeds a row, separately from both units.
+enum QuantitySource {
+  workQuantity('مقدار العمل'),
+  roofArea('مساحة السقف'),
+  roofBeamLength('أطوال كمرات السقف');
+
+  const QuantitySource(this.label);
+  final String label;
+}
+
 enum WorkKind {
   foundations('القواعد', QuantityUnit.foundation),
   belowMasonry('مباني تحت الكتينة', QuantityUnit.linear),
@@ -49,6 +59,9 @@ class MaterialDefinition {
 
 const _unchanged = Object();
 bool validNonnegative(double value) => value.isFinite && value >= 0;
+const maxProfitPercentage = 1000000.0;
+bool validProfitPercentage(double value) =>
+    validNonnegative(value) && value <= maxProfitPercentage;
 
 class ModelRow {
   const ModelRow({
@@ -57,6 +70,7 @@ class ModelRow {
     this.materialId,
     required this.unit,
     this.sourceUnit,
+    this.quantitySource = QuantitySource.workQuantity,
     required this.coefficient,
     this.divisor = 1,
     required this.defaultPrice,
@@ -67,6 +81,7 @@ class ModelRow {
   final String? materialId;
   final QuantityUnit unit;
   final QuantityUnit? sourceUnit;
+  final QuantitySource quantitySource;
   final double coefficient;
   final double divisor;
   final double defaultPrice;
@@ -86,6 +101,7 @@ class ModelRow {
     Object? materialId = _unchanged,
     QuantityUnit? unit,
     Object? sourceUnit = _unchanged,
+    QuantitySource? quantitySource,
     double? coefficient,
     double? divisor,
     double? defaultPrice,
@@ -100,6 +116,7 @@ class ModelRow {
     sourceUnit: identical(sourceUnit, _unchanged)
         ? this.sourceUnit
         : sourceUnit as QuantityUnit?,
+    quantitySource: quantitySource ?? this.quantitySource,
     coefficient: coefficient ?? this.coefficient,
     divisor: divisor ?? this.divisor,
     defaultPrice: defaultPrice ?? this.defaultPrice,
@@ -111,6 +128,7 @@ class ModelRow {
     'materialId': materialId,
     'unit': unit.name,
     'sourceUnit': sourceUnit?.name,
+    'quantitySource': quantitySource.name,
     'coefficient': coefficient,
     'divisor': divisor,
     'defaultPrice': defaultPrice,
@@ -125,6 +143,9 @@ class ModelRow {
       sourceUnit: json['sourceUnit'] == null
           ? null
           : QuantityUnit.values.byName(_string(json, 'sourceUnit')),
+      quantitySource: json.containsKey('quantitySource')
+          ? QuantitySource.values.byName(_string(json, 'quantitySource'))
+          : QuantitySource.workQuantity,
       coefficient: _number(json, 'coefficient'),
       divisor: _number(json, 'divisor'),
       defaultPrice: _number(json, 'defaultPrice'),
@@ -151,11 +172,18 @@ class WorkModel {
   final QuantityUnit inputUnit;
   final List<ModelRow> rows;
   bool get isBuiltIn => id.startsWith('builtin-');
+  bool get requiresRoofBeamLength =>
+      rows.any((row) => row.quantitySource != QuantitySource.workQuantity);
   bool get isValid =>
       id.trim().isNotEmpty &&
       name.trim().isNotEmpty &&
       rows.isNotEmpty &&
-      rows.every((row) => row.isValid) &&
+      rows.every(
+        (row) =>
+            row.isValid &&
+            (row.quantitySource == QuantitySource.workQuantity ||
+                kind == WorkKind.roof && inputUnit == QuantityUnit.area),
+      ) &&
       rows.map((row) => row.id).toSet().length == rows.length &&
       (kind == WorkKind.roof || inputUnit == kind.defaultUnit);
   WorkModel copyWith({
@@ -205,16 +233,31 @@ class WorkEntry {
   WorkEntry({
     required this.kind,
     required this.included,
+    bool? explicitlyExcluded,
     this.quantity,
+    this.roofBeamLength,
     this.model,
     Map<String, double?> priceOverrides = const {},
-  }) : priceOverrides = Map.unmodifiable(priceOverrides);
+  }) : explicitlyExcluded = explicitlyExcluded ?? !included,
+       priceOverrides = Map.unmodifiable(priceOverrides);
   final WorkKind kind;
   final bool included;
+  final bool explicitlyExcluded;
   final double? quantity;
+  final double? roofBeamLength;
   final WorkModel? model;
   final Map<String, double?> priceOverrides;
   QuantityUnit get inputUnit => model?.inputUnit ?? kind.defaultUnit;
+  bool get requiresRoofBeamLength => model?.requiresRoofBeamLength ?? false;
+  double? quantityFor(QuantitySource source) => switch (source) {
+    QuantitySource.workQuantity || QuantitySource.roofArea => quantity,
+    QuantitySource.roofBeamLength => roofBeamLength,
+  };
+  QuantityUnit unitFor(QuantitySource source) => switch (source) {
+    QuantitySource.workQuantity => inputUnit,
+    QuantitySource.roofArea => QuantityUnit.area,
+    QuantitySource.roofBeamLength => QuantityUnit.linear,
+  };
   bool get quantityValid =>
       quantity != null &&
       validNonnegative(quantity!) &&
@@ -223,22 +266,32 @@ class WorkEntry {
               quantity! == quantity!.truncateToDouble()));
   WorkEntry copyWith({
     bool? included,
+    bool? explicitlyExcluded,
     Object? quantity = _unchanged,
+    Object? roofBeamLength = _unchanged,
     Object? model = _unchanged,
     Map<String, double?>? priceOverrides,
   }) => WorkEntry(
     kind: kind,
     included: included ?? this.included,
+    explicitlyExcluded:
+        explicitlyExcluded ??
+        (included == null ? this.explicitlyExcluded : !included),
     quantity: identical(quantity, _unchanged)
         ? this.quantity
         : (quantity as num?)?.toDouble(),
+    roofBeamLength: identical(roofBeamLength, _unchanged)
+        ? this.roofBeamLength
+        : (roofBeamLength as num?)?.toDouble(),
     model: identical(model, _unchanged) ? this.model : model as WorkModel?,
     priceOverrides: priceOverrides ?? this.priceOverrides,
   );
   Map<String, Object?> toJson() => {
     'kind': kind.name,
     'included': included,
+    'explicitlyExcluded': explicitlyExcluded,
     'quantity': quantity,
+    'roofBeamLength': roofBeamLength,
     'model': model?.toJson(),
     'priceOverrides': priceOverrides,
   };
@@ -246,13 +299,19 @@ class WorkEntry {
     final entry = WorkEntry(
       kind: WorkKind.values.byName(_string(json, 'kind')),
       included: _bool(json, 'included'),
+      explicitlyExcluded: json.containsKey('explicitlyExcluded')
+          ? _bool(json, 'explicitlyExcluded')
+          : null,
       quantity: _nullableNumber(json['quantity']),
+      roofBeamLength: _nullableNumber(json['roofBeamLength']),
       model: json['model'] == null
           ? null
           : WorkModel.fromJson(jsonMap(json['model'])),
       priceOverrides: _prices(json['priceOverrides']),
     );
     if ((entry.quantity != null && !entry.quantityValid) ||
+        (entry.included && entry.explicitlyExcluded) ||
+        (entry.kind != WorkKind.roof && entry.roofBeamLength != null) ||
         (entry.model != null && entry.model!.kind != entry.kind)) {
       throw const FormatException('Invalid work entry');
     }
@@ -270,9 +329,14 @@ class Project {
     required Map<String, double?> materialPrices,
     Map<String, double?> servicePrices = const {},
     this.isExample = false,
+    this.profitPercentage = 0,
+    Map<String, String> inputDrafts = const {},
+    this.calculatedProject,
+    this.calculationStale = false,
   }) : works = List.unmodifiable(works),
        materialPrices = Map.unmodifiable(materialPrices),
-       servicePrices = Map.unmodifiable(servicePrices);
+       servicePrices = Map.unmodifiable(servicePrices),
+       inputDrafts = Map.unmodifiable(inputDrafts);
   final String id;
   final String name;
   final String date;
@@ -281,6 +345,16 @@ class Project {
   final Map<String, double?> materialPrices;
   final Map<String, double?> servicePrices;
   final bool isExample;
+  final double? profitPercentage;
+
+  /// Invalid or unfinished input can never silently revert to an earlier value
+  /// when this project is reopened. Keep it apart from the last valid value.
+  final Map<String, String> inputDrafts;
+
+  /// Original, normalized inputs taken at the last explicit calculation.
+  /// Nested calculation snapshots are disallowed when saved or restored.
+  final Project? calculatedProject;
+  final bool calculationStale;
   WorkEntry work(WorkKind kind) =>
       works.firstWhere((entry) => entry.kind == kind);
   Project updateWork(WorkEntry entry) => copyWith(
@@ -295,6 +369,10 @@ class Project {
     Map<String, double?>? materialPrices,
     Map<String, double?>? servicePrices,
     bool? isExample,
+    Object? profitPercentage = _unchanged,
+    Map<String, String>? inputDrafts,
+    Object? calculatedProject = _unchanged,
+    bool? calculationStale,
   }) => Project(
     id: id ?? this.id,
     name: name ?? this.name,
@@ -304,6 +382,14 @@ class Project {
     materialPrices: materialPrices ?? this.materialPrices,
     servicePrices: servicePrices ?? this.servicePrices,
     isExample: isExample ?? this.isExample,
+    profitPercentage: identical(profitPercentage, _unchanged)
+        ? this.profitPercentage
+        : (profitPercentage as num?)?.toDouble(),
+    inputDrafts: inputDrafts ?? this.inputDrafts,
+    calculatedProject: identical(calculatedProject, _unchanged)
+        ? this.calculatedProject
+        : calculatedProject as Project?,
+    calculationStale: calculationStale ?? this.calculationStale,
   );
   Map<String, Object?> toJson() => {
     'id': id,
@@ -314,8 +400,18 @@ class Project {
     'materialPrices': materialPrices,
     'servicePrices': servicePrices,
     'isExample': isExample,
+    'profitPercentage': profitPercentage,
+    'inputDrafts': inputDrafts,
+    'calculatedProject': calculatedProject?.toJson(),
+    'calculationStale': calculationStale,
   };
   factory Project.fromJson(Map<String, dynamic> json) {
+    final snapshot = json['calculatedProject'] == null
+        ? null
+        : jsonMap(json['calculatedProject']);
+    if (snapshot?['calculatedProject'] != null) {
+      throw const FormatException('Nested calculation snapshot');
+    }
     final project = Project(
       id: _string(json, 'id'),
       name: _string(json, 'name'),
@@ -328,10 +424,31 @@ class Project {
       materialPrices: _prices(json['materialPrices']),
       servicePrices: _prices(json['servicePrices']),
       isExample: _bool(json, 'isExample'),
+      profitPercentage: json.containsKey('profitPercentage')
+          ? _nullableNumber(json['profitPercentage'])
+          : 0,
+      inputDrafts: json.containsKey('inputDrafts')
+          ? jsonMap(json['inputDrafts']).map((key, value) {
+              if (value is! String) {
+                throw const FormatException('Invalid draft');
+              }
+              return MapEntry(key, value);
+            })
+          : const {},
+      calculatedProject: snapshot == null ? null : Project.fromJson(snapshot),
+      calculationStale: json.containsKey('calculationStale')
+          ? _bool(json, 'calculationStale')
+          : false,
     );
     if (project.id.trim().isEmpty ||
         project.name.trim().isEmpty ||
         DateTime.tryParse(project.date) == null ||
+        (project.profitPercentage != null &&
+            !validProfitPercentage(project.profitPercentage!)) ||
+        (project.calculationStale && project.calculatedProject == null) ||
+        (project.calculatedProject != null &&
+            (project.calculatedProject!.id != project.id ||
+                project.calculatedProject!.inputDrafts.isNotEmpty)) ||
         project.works.length != WorkKind.values.length ||
         project.works.map((work) => work.kind).toSet().length !=
             WorkKind.values.length) {
@@ -348,7 +465,7 @@ class ProjectState {
     List<WorkModel> customModels = const [],
   }) : projects = List.unmodifiable(projects),
        customModels = List.unmodifiable(customModels);
-  static const schemaVersion = 2;
+  static const schemaVersion = 3;
   final List<Project> projects;
   final String currentProjectId;
   final List<WorkModel> customModels;
@@ -393,8 +510,11 @@ class ProjectState {
     'currentProjectId': currentProjectId,
     'customModels': customModels.map((model) => model.toJson()).toList(),
   };
-  factory ProjectState.fromJson(Map<String, dynamic> json) {
-    if (json['version'] != schemaVersion) {
+  factory ProjectState.fromJson(
+    Map<String, dynamic> json, {
+    bool migrateV2 = false,
+  }) {
+    if (json['version'] != (migrateV2 ? 2 : schemaVersion)) {
       throw const FormatException('Unsupported schema');
     }
     final state = ProjectState(

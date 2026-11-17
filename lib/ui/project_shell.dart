@@ -2,7 +2,6 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:printing/printing.dart';
 
-import '../domain/numbers.dart';
 import '../project/catalog.dart';
 import '../project/controller.dart';
 import '../project/engine.dart';
@@ -114,10 +113,17 @@ class _ProjectShellState extends State<ProjectShell>
                 key: const ValueKey('example_project'),
                 leading: const Icon(Icons.description_outlined),
                 title: const Text('إضافة «مثال الأوراق»'),
-                subtitle: const Text(
-                  'مثال مستقل بأرقام الأوراق للاطلاع والتجربة',
-                ),
+                subtitle: const Text('المثال السابق دون السقف'),
                 onTap: () => Navigator.pop(context, '__example'),
+              ),
+              ListTile(
+                key: const ValueKey('full_example_project'),
+                leading: const Icon(Icons.description_outlined),
+                title: const Text('إضافة «مثال الأوراق بالسقف»'),
+                subtitle: const Text(
+                  'مثال مستقل يشمل مساحة السقف وأطوال الكمرات',
+                ),
+                onTap: () => Navigator.pop(context, '__full_example'),
               ),
             ],
           ),
@@ -126,12 +132,18 @@ class _ProjectShellState extends State<ProjectShell>
     );
     if (selected == null || !mounted) return;
     await _action(() async {
-      if (selected == '__new' || selected == '__example') {
-        await controller.addProject(example: selected == '__example');
+      if (selected == '__new' ||
+          selected == '__example' ||
+          selected == '__full_example') {
+        await controller.addProject(
+          example: selected == '__example',
+          fullExample: selected == '__full_example',
+        );
         if (selected == '__new' && mounted) await _metadata();
       } else {
         await controller.selectProject(selected);
       }
+      if (mounted) setState(() => _tab = 0);
     });
   }
 
@@ -155,15 +167,38 @@ class _ProjectShellState extends State<ProjectShell>
     );
   }
 
-  Future<void> _export() async {
-    if (_exporting) return;
+  void _changeTab(int index) {
     FocusScope.of(context).unfocus();
-    final snapshot = controller.result;
+    setState(() => _tab = index);
+  }
+
+  Future<void> _calculate() async {
+    FocusScope.of(context).unfocus();
+    await _action(() async {
+      await controller.calculate();
+      if (mounted) _changeTab(2);
+    });
+  }
+
+  Future<void> _export() async {
+    if (_exporting || controller.needsRecalculation) return;
+    final snapshot = controller.calculatedResult;
+    if (snapshot == null || snapshot.quotationTotal == null) return;
+    FocusScope.of(context).unfocus();
     setState(() => _exporting = true);
     try {
-      final bytes = await ProjectReportService.generate(snapshot);
-      const filename = 'hasr-project-report.pdf';
-      if (!mounted) return;
+      final createdAt = DateTime.now();
+      final bytes = await ProjectReportService.generate(
+        snapshot,
+        createdAt: createdAt,
+      );
+      final filename = ProjectReportService.filename(createdAt);
+      if (!mounted ||
+          controller.needsRecalculation ||
+          controller.calculatedResult?.project.id != snapshot.project.id ||
+          controller.calculatedResult?.project != snapshot.project) {
+        return;
+      }
       if (kIsWeb) {
         final file = prepareBrowserPdf(bytes, filename);
         await showDialog<void>(
@@ -191,7 +226,8 @@ class _ProjectShellState extends State<ProjectShell>
       if (!controller.loaded) {
         return const Scaffold(body: Center(child: CircularProgressIndicator()));
       }
-      final titles = ['حصر المشروع', 'أسعار المشروع', 'نتائج المشروع'];
+      final titles = ['كميات المشروع', 'الأسعار والربح', 'نتائج المشروع'];
+      final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
       return Scaffold(
         appBar: AppBar(
           title: Text(titles[_tab]),
@@ -199,7 +235,7 @@ class _ProjectShellState extends State<ProjectShell>
             IconButton(
               key: const ValueKey('project_picker'),
               tooltip: 'اختيار مشروع',
-              onPressed: controller.editable ? _projects : null,
+              onPressed: controller.editable && !_exporting ? _projects : null,
               icon: const Icon(Icons.folder_open_rounded),
             ),
           ],
@@ -224,35 +260,34 @@ class _ProjectShellState extends State<ProjectShell>
             ],
           ),
         ),
-        bottomNavigationBar: NavigationBar(
-          selectedIndex: _tab,
-          onDestinationSelected: (index) {
-            FocusScope.of(context).unfocus();
-            setState(() => _tab = index);
-          },
-          backgroundColor: Colors.white,
-          indicatorColor: const Color(0xFFDCEFE6),
-          destinations: const [
-            NavigationDestination(
-              key: ValueKey('tab_project'),
-              icon: Icon(Icons.home_outlined),
-              selectedIcon: Icon(Icons.home, color: primaryGreen),
-              label: 'المشروع',
-            ),
-            NavigationDestination(
-              key: ValueKey('tab_prices'),
-              icon: Icon(Icons.sell_outlined),
-              selectedIcon: Icon(Icons.sell, color: primaryGreen),
-              label: 'الأسعار',
-            ),
-            NavigationDestination(
-              key: ValueKey('tab_results'),
-              icon: Icon(Icons.bar_chart_outlined),
-              selectedIcon: Icon(Icons.bar_chart, color: primaryGreen),
-              label: 'النتائج',
-            ),
-          ],
-        ),
+        bottomNavigationBar: keyboardOpen
+            ? null
+            : NavigationBar(
+                selectedIndex: _tab,
+                onDestinationSelected: _changeTab,
+                backgroundColor: Colors.white,
+                indicatorColor: const Color(0xFFDCEFE6),
+                destinations: const [
+                  NavigationDestination(
+                    key: ValueKey('tab_project'),
+                    icon: Icon(Icons.straighten_outlined),
+                    selectedIcon: Icon(Icons.straighten, color: primaryGreen),
+                    label: 'الكميات',
+                  ),
+                  NavigationDestination(
+                    key: ValueKey('tab_prices'),
+                    icon: Icon(Icons.sell_outlined),
+                    selectedIcon: Icon(Icons.sell, color: primaryGreen),
+                    label: 'الأسعار والربح',
+                  ),
+                  NavigationDestination(
+                    key: ValueKey('tab_results'),
+                    icon: Icon(Icons.bar_chart_outlined),
+                    selectedIcon: Icon(Icons.bar_chart, color: primaryGreen),
+                    label: 'النتائج',
+                  ),
+                ],
+              ),
       );
     },
   );
@@ -260,7 +295,14 @@ class _ProjectShellState extends State<ProjectShell>
   Widget _project() {
     final project = controller.project;
     final result = controller.result;
-    return ProjectBody(
+    final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
+    final calculateButton = FilledButton.icon(
+      key: const ValueKey('calculate_project'),
+      onPressed: controller.editable ? _calculate : null,
+      icon: const Icon(Icons.calculate_outlined),
+      label: const Text('احسب المشروع'),
+    );
+    final fields = ProjectBody(
       key: ValueKey('project:${project.id}'),
       children: [
         SurfaceCard(
@@ -280,7 +322,7 @@ class _ProjectShellState extends State<ProjectShell>
                         ),
                       ),
                       Text(
-                        '${project.date}${project.location.isEmpty ? '' : ' • ${project.location}'}',
+                        '${project.date} • ${project.location.isEmpty ? 'لم يُحدَّد الموقع' : project.location}',
                         style: const TextStyle(color: secondaryText),
                       ),
                       if (project.isExample)
@@ -313,104 +355,221 @@ class _ProjectShellState extends State<ProjectShell>
             ],
           ),
         ),
-        for (final note in result.notes) Notice(note),
-        if (result.works.any((work) => work.status == WorkStatus.needsData))
-          const Notice(
-            'بعض البنود تحتاج بيانات، ولا تدخل في الإجمالي حتى تكتمل.',
+        if (keyboardOpen) ...[const SizedBox(height: 16), calculateButton],
+      ],
+    );
+    return Column(
+      children: [
+        Expanded(child: fields),
+        if (!keyboardOpen)
+          Container(
+            width: double.infinity,
+            color: Theme.of(context).scaffoldBackgroundColor,
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 650),
+                child: SizedBox(width: double.infinity, child: calculateButton),
+              ),
+            ),
           ),
-        const SizedBox(height: 20),
-        TotalCard(value: result.totalCost, large: false),
       ],
     );
   }
 
   Widget _workRow(WorkResult result) {
     final entry = result.entry;
-    final unit = entry.model?.inputUnit;
-    final title = InkWell(
-      onTap: () => _details(entry.kind),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: Row(
-          children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    entry.kind.label,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  Text(
-                    !entry.included
-                        ? 'مستبعد من المشروع'
-                        : entry.model == null
-                        ? 'بانتظار النموذج'
-                        : '${entry.model!.name}${entry.model!.description.isEmpty ? '' : ' • ${entry.model!.description}'}',
-                    style: const TextStyle(color: secondaryText, fontSize: 12),
-                  ),
-                ],
-              ),
-            ),
-            const Icon(Icons.chevron_left, color: secondaryText),
-          ],
-        ),
-      ),
+    final kind = entry.kind;
+    final model = entry.model;
+    final unit = model?.inputUnit ?? kind.defaultUnit;
+    final saved = controller.savedProject;
+    final raw = controller.draft(
+      'quantity:${kind.name}',
+      saved.work(kind).quantity,
     );
-    final quantity = entry.included && unit != null
-        ? SizedBox(
-            width: 118,
-            child: NumberInput(
-              semanticLabel: 'كمية ${entry.kind.label}',
-              key: ValueKey(
-                '${controller.savedProject.id}:quantity:${entry.kind.name}',
-              ),
-              text: controller.draft(
-                'quantity:${entry.kind.name}',
-                controller.savedProject.work(entry.kind).quantity,
-              ),
-              label: unit.shortLabel,
-              integer: entry.kind.integerQuantity,
-              enabled: controller.editable,
-              error: entry.quantity == null ? 'أدخل كمية صالحة' : null,
-              onChanged: (value) => controller.quantity(entry.kind, value),
-            ),
-          )
-        : OutlinedButton(
-            key: ValueKey('work_${entry.kind.name}'),
-            onPressed: () => _details(entry.kind),
-            child: Text(entry.included ? 'غير محسوب' : 'إضافة'),
-          );
+    final beamRaw = controller.draft(
+      'roofBeamLength',
+      saved.work(kind).roofBeamLength,
+    );
+    final roofArea = kind == WorkKind.roof && unit == QuantityUnit.area;
+    final showBeams =
+        kind == WorkKind.roof &&
+        (model == null || model.requiresRoofBeamLength);
+    final status =
+        result.status == WorkStatus.calculated &&
+            (controller.calculatedResult == null ||
+                controller.needsRecalculation)
+        ? 'جاهز للحساب'
+        : statusLabel(result.status);
+    final title = switch (kind) {
+      WorkKind.foundations => 'عدد القواعد',
+      WorkKind.belowMasonry => 'طول مباني تحت الكتينة',
+      WorkKind.tieBeam => 'طول الميدة',
+      WorkKind.leanSlab => 'مساحة الكرسنة',
+      WorkKind.columns => 'عدد الأعمدة',
+      WorkKind.aboveMasonry => 'طول مباني فوق الكتينة',
+      WorkKind.roof => 'السقف',
+    };
+    final quantity = NumberInput(
+      semanticLabel: roofArea ? 'مساحة السقف' : 'كمية ${kind.label}',
+      key: ValueKey('${saved.id}:quantity:${kind.name}'),
+      text: raw,
+      label: unit.label,
+      integer: kind.integerQuantity,
+      enabled: controller.editable,
+      error: raw.isNotEmpty && entry.quantity == null
+          ? 'أدخل كمية صالحة'
+          : null,
+      onChanged: (value) => controller.quantity(kind, value),
+    );
+    final beams = NumberInput(
+      semanticLabel: 'إجمالي أطوال كمرات السقف',
+      key: ValueKey('${saved.id}:roof_beam_length'),
+      text: beamRaw,
+      label: QuantityUnit.linear.label,
+      enabled: controller.editable,
+      error: beamRaw.isNotEmpty && entry.roofBeamLength == null
+          ? 'أدخل طولًا صالحًا'
+          : null,
+      onChanged: controller.roofBeamLength,
+    );
+    Widget roofField(String label, Widget field) => Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
+        const SizedBox(height: 8),
+        field,
+      ],
+    );
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final stacked =
-              constraints.maxWidth < 280 ||
-              MediaQuery.textScalerOf(context).scale(1) > 1.3;
-          return stacked
-              ? Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    title,
-                    const SizedBox(height: 8),
-                    Align(
-                      alignment: AlignmentDirectional.centerStart,
-                      child: quantity,
-                    ),
-                  ],
-                )
-              : Row(
-                  children: [
-                    Expanded(child: title),
-                    const SizedBox(width: 10),
-                    quantity,
-                  ],
-                );
-        },
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Flexible(
+                child: Text(
+                  entry.explicitlyExcluded ? 'غير مطلوب' : status,
+                  textAlign: TextAlign.end,
+                  style: TextStyle(
+                    color:
+                        !entry.explicitlyExcluded &&
+                            (result.status == WorkStatus.needsData ||
+                                result.status == WorkStatus.noModel)
+                        ? const Color(0xFF86531A)
+                        : primaryGreen,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 3),
+          if (entry.explicitlyExcluded || kind == WorkKind.roof)
+            Text(
+              model?.name ?? 'لم يُختَر نموذج',
+              style: const TextStyle(color: secondaryText, fontSize: 13),
+            ),
+          if (!entry.explicitlyExcluded) ...[
+            const SizedBox(height: 12),
+            if (showBeams)
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final areaField = roofField('مساحة السقف', quantity);
+                  final beamField = roofField(
+                    'إجمالي أطوال كمرات السقف',
+                    beams,
+                  );
+                  if (constraints.maxWidth < 480 ||
+                      MediaQuery.textScalerOf(context).scale(1) > 1.2) {
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        areaField,
+                        const SizedBox(height: 12),
+                        beamField,
+                      ],
+                    );
+                  }
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: areaField),
+                      const SizedBox(width: 12),
+                      Expanded(child: beamField),
+                    ],
+                  );
+                },
+              )
+            else if (kind == WorkKind.roof)
+              roofArea ? roofField('مساحة السقف', quantity) : quantity
+            else
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final name = Text(
+                    model?.name ?? 'لم يُختَر نموذج',
+                    style: const TextStyle(color: secondaryText, fontSize: 13),
+                  );
+                  if (constraints.maxWidth < 310 ||
+                      MediaQuery.textScalerOf(context).scale(1) > 1.3) {
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [name, const SizedBox(height: 12), quantity],
+                    );
+                  }
+                  return Row(
+                    children: [
+                      Expanded(child: name),
+                      const SizedBox(width: 12),
+                      SizedBox(width: 148, child: quantity),
+                    ],
+                  );
+                },
+              ),
+            if (showBeams &&
+                (entry.quantity == null ||
+                    (entry.quantity! > 0 && entry.roofBeamLength == null)))
+              const Padding(
+                padding: EdgeInsets.only(top: 6),
+                child: Text(
+                  'أدخل مساحة السقف وأطوال الكمرات.',
+                  style: TextStyle(color: secondaryText, fontSize: 12),
+                ),
+              ),
+          ],
+          Wrap(
+            spacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              TextButton(
+                key: ValueKey('work_${kind.name}'),
+                onPressed: () => _details(kind),
+                child: const Text('تفاصيل النموذج'),
+              ),
+              TextButton(
+                key: ValueKey('include_${kind.name}'),
+                onPressed: controller.editable
+                    ? () => controller.include(kind, entry.explicitlyExcluded)
+                    : null,
+                child: Text(
+                  entry.explicitlyExcluded ? 'إضافة للحصر' : 'غير مطلوب',
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -447,11 +606,44 @@ class _ProjectShellState extends State<ProjectShell>
         const Padding(
           padding: EdgeInsets.symmetric(vertical: 18),
           child: Text(
-            'تُطبّق هذه الأسعار على المشروع الحالي',
+            'الأسعار ونسبة الربح تخص هذا المشروع',
             textAlign: TextAlign.center,
             style: TextStyle(color: secondaryText),
           ),
         ),
+        SurfaceCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'نسبة الربح المضافة إلى التكلفة',
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'تُضاف إلى إجمالي تكلفة المواد والمصنعية والخدمات',
+                style: TextStyle(color: secondaryText),
+              ),
+              const SizedBox(height: 14),
+              NumberInput(
+                semanticLabel: 'نسبة الربح المضافة إلى التكلفة',
+                key: ValueKey('${project.id}:profit_percentage'),
+                text: controller.draft(
+                  'profitPercentage',
+                  controller.savedProject.profitPercentage,
+                ),
+                label: 'نسبة الربح',
+                suffixText: '%',
+                enabled: controller.editable,
+                error: project.profitPercentage == null
+                    ? 'أدخل نسبة من 0 إلى ${measure(maxProfitPercentage)}'
+                    : null,
+                onChanged: controller.profitPercentage,
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
         if (!_services)
           SurfaceCard(
             child: Column(
@@ -483,11 +675,9 @@ class _ProjectShellState extends State<ProjectShell>
           )
         else ...[
           for (final work in project.works.where(
-            (entry) => entry.model != null,
+            (entry) => entry.model?.rows.any((row) => !row.isMaterial) ?? false,
           )) ...[
-            SectionHeading(
-              '${work.kind.label}${work.included ? '' : ' • مستبعد'}',
-            ),
+            SectionHeading(work.kind.label),
             SurfaceCard(
               child: Column(
                 children: [
@@ -497,9 +687,6 @@ class _ProjectShellState extends State<ProjectShell>
                     _priceRow(
                       label: row.label,
                       unit: row.unit,
-                      note: row.reviewBasis
-                          ? 'أساس التسعير قابل للمراجعة من النموذج'
-                          : null,
                       input: NumberInput(
                         semanticLabel: 'سعر ${row.label} ${work.kind.label}',
                         key: ValueKey(
@@ -535,21 +722,11 @@ class _ProjectShellState extends State<ProjectShell>
                             controller.servicePrice(work.kind, row, value),
                       ),
                     ),
-                  TextButton(
-                    onPressed: () => _details(work.kind),
-                    child: const Text('تفاصيل البند وأساس التسعير'),
-                  ),
                 ],
               ),
             ),
           ],
         ],
-        const SizedBox(height: 20),
-        const Text(
-          'تتحدث النتائج تلقائيًا عند تعديل الأسعار',
-          textAlign: TextAlign.center,
-          style: TextStyle(color: secondaryText),
-        ),
       ],
     );
   }
@@ -558,7 +735,6 @@ class _ProjectShellState extends State<ProjectShell>
     required String label,
     required QuantityUnit unit,
     required Widget input,
-    String? note,
   }) => Padding(
     padding: const EdgeInsets.symmetric(vertical: 12),
     child: LayoutBuilder(
@@ -574,11 +750,6 @@ class _ProjectShellState extends State<ProjectShell>
               'د.ل / ${unit.label}',
               style: const TextStyle(color: secondaryText),
             ),
-            if (note != null)
-              Text(
-                note,
-                style: const TextStyle(color: Color(0xFF86531A), fontSize: 12),
-              ),
           ],
         );
         return constraints.maxWidth < 280 ||
@@ -599,9 +770,52 @@ class _ProjectShellState extends State<ProjectShell>
   );
 
   Widget _results() {
-    final result = controller.result;
+    final project = controller.project;
+    final result = controller.calculatedResult;
+    if (controller.needsRecalculation || result == null) {
+      final stale = controller.needsRecalculation;
+      return ProjectBody(
+        key: ValueKey('results:${project.id}:$stale'),
+        children: [
+          const SizedBox(height: 18),
+          SurfaceCard(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Icon(
+                  stale ? Icons.refresh_rounded : Icons.calculate_outlined,
+                  color: primaryGreen,
+                  size: 38,
+                ),
+                SectionHeading(
+                  stale ? 'الحسبة تحتاج تحديثًا' : 'لم يُحسب المشروع بعد',
+                ),
+                Text(
+                  stale
+                      ? 'تغيّرت بيانات المشروع بعد آخر حساب. حدّث الحسبة لعرض النتائج وتنزيل التقرير.'
+                      : 'أدخل كميات الأعمال والأسعار، ثم اضغط «احسب المشروع» لعرض النتائج.',
+                ),
+                const SizedBox(height: 18),
+                FilledButton.icon(
+                  key: const ValueKey('recalculate_project'),
+                  onPressed: stale
+                      ? (controller.editable ? _calculate : null)
+                      : () => _changeTab(0),
+                  icon: Icon(stale ? Icons.refresh : Icons.straighten_outlined),
+                  label: Text(stale ? 'تحديث الحسبة' : 'إدخال الكميات'),
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+    final profit = result.profitPercentage;
+    final profitAmount = result.profitAmount;
+    final quotation = result.quotationTotal;
+    final shareAvailable = !kIsWeb || supportsBrowserFileSharing;
     return ProjectBody(
-      key: ValueKey('results:${result.project.id}'),
+      key: ValueKey('results:${project.id}'),
       children: [
         Text(
           result.project.name,
@@ -609,145 +823,198 @@ class _ProjectShellState extends State<ProjectShell>
           style: const TextStyle(fontSize: 18, color: secondaryText),
         ),
         const SizedBox(height: 18),
-        TotalCard(
-          key: const ValueKey('project_total'),
-          value: result.totalCost,
-        ),
-        Notice(
-          '${result.calculatedCount} بنود محسوبة • ${result.isPartial ? 'حصر مبدئي / جزئي' : 'مكتمل ضمن نطاقه'}',
-        ),
-        for (final note in result.notes) Notice(note),
-        for (final work in result.works.where(
-          (work) => work.status == WorkStatus.needsData,
-        ))
-          Notice('${work.kind.label}: يحتاج بيانات، غير مشمول في الإجمالي'),
+        if (quotation != null)
+          TotalCard(
+            key: const ValueKey('project_total'),
+            title: 'إجمالي العرض شامل الربح',
+            value: quotation,
+          )
+        else ...[
+          const Notice(
+            'أدخل نسبة ربح صالحة لإظهار إجمالي العرض وإتاحة التقرير.',
+          ),
+          TextButton(
+            onPressed: () => _changeTab(1),
+            child: const Text('تعديل نسبة الربح'),
+          ),
+        ],
+        if (result.isPartial)
+          const Notice('حصر جزئي — توجد بنود غير مكتملة')
+        else
+          const Padding(
+            padding: EdgeInsets.only(top: 10),
+            child: Text('حصر كامل ضمن النطاق المحدد'),
+          ),
+        if (result.unfinishedWorks.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
+            child: Text(
+              'البنود غير المكتملة: ${result.unfinishedWorks.map((work) => work.kind.label).join('، ')}',
+              style: const TextStyle(color: secondaryText),
+            ),
+          ),
         const SizedBox(height: 12),
         SurfaceCard(
           child: Column(
             children: [
               DetailPair(
-                'المواد',
+                'تكلفة المواد',
                 '${money(result.materialCost)} د.ل',
                 bold: true,
               ),
               const Divider(),
               DetailPair(
-                'المصنعية والخدمات',
+                'تكلفة المصنعية والخدمات',
                 '${money(result.serviceCost)} د.ل',
                 bold: true,
+              ),
+              const Divider(),
+              DetailPair(
+                'إجمالي التكلفة قبل الربح',
+                '${money(result.baseCost)} د.ل',
+                bold: true,
+              ),
+              const Divider(),
+              DetailPair(
+                'نسبة الربح',
+                profit == null ? '—' : '${measure(profit)}%',
+              ),
+              const Divider(),
+              DetailPair(
+                'قيمة الربح',
+                profitAmount == null ? '—' : '${money(profitAmount)} د.ل',
               ),
             ],
           ),
         ),
-        const SectionHeading('إجمالي كميات المواد'),
-        SurfaceCard(
-          child: Column(
-            children: [
-              if (result.materials.isEmpty)
-                const Text('أكمل بيانات بند واحد لإظهار كمياته.'),
-              for (final total in result.materials) ...[
-                DetailPair(
-                  total.material.label,
-                  '${formatNumber(total.quantity)} ${total.material.unit.label}',
-                  bold: true,
-                ),
-                if (total.hasDifferentPrices)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: Text(
-                      'أسعار متعددة محفوظة — تكلفة السطور ${money(total.cost)} د.ل',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: secondaryText,
-                      ),
-                    ),
-                  ),
-                if (total != result.materials.last) const Divider(),
-              ],
-            ],
-          ),
-        ),
-        const SizedBox(height: 14),
-        SurfaceCard(
-          padding: EdgeInsets.zero,
-          child: ExpansionTile(
-            title: const Text(
-              'تفاصيل المصنعية والخدمات',
-              style: TextStyle(fontWeight: FontWeight.w700),
+        const SizedBox(height: 16),
+        _resultSection('كميات المواد المطلوبة', [
+          if (result.materials.isEmpty)
+            const Text('لا توجد مواد في الحصر الحالي.'),
+          for (final total in result.materials) ...[
+            DetailPair(
+              total.material.label,
+              '${measure(total.quantity)} ${total.material.unit.label}',
+              bold: true,
             ),
-            childrenPadding: const EdgeInsets.all(14),
-            children: [
-              for (final line in result.services)
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Text(
-                      '${line.kind.label} • ${line.label}',
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                    DetailPair(
-                      '${formatNumber(line.quantity)} ${line.unit.label} × ${money(line.unitPrice)} د.ل',
-                      '${money(line.cost)} د.ل',
-                    ),
-                    if (line.reviewBasis)
-                      const Text(
-                        'أساس التسعير قابل للمراجعة',
-                        style: TextStyle(
-                          color: Color(0xFF86531A),
-                          fontSize: 12,
-                        ),
-                      ),
-                    const Divider(),
-                  ],
-                ),
-            ],
-          ),
-        ),
+            DetailPair(
+              total.hasDifferentPrices
+                  ? 'تكلفة السطور بأسعارها المحفوظة'
+                  : 'التكلفة',
+              '${money(total.cost)} د.ل',
+            ),
+            if (total != result.materials.last) const Divider(),
+          ],
+        ]),
         const SizedBox(height: 10),
-        SurfaceCard(
-          padding: EdgeInsets.zero,
-          child: ExpansionTile(
-            title: const Text(
-              'التكلفة حسب بند العمل',
-              style: TextStyle(fontWeight: FontWeight.w700),
+        _resultSection('التكلفة حسب بند العمل', [
+          for (final work in result.works)
+            DetailPair(
+              work.kind.label,
+              work.status == WorkStatus.calculated && work.cost != null
+                  ? '${money(work.cost!)} د.ل'
+                  : statusLabel(work.status),
             ),
-            childrenPadding: const EdgeInsets.all(14),
-            children: [
-              for (final work in result.works)
-                InkWell(
-                  onTap: () => _details(work.kind),
-                  child: DetailPair(
-                    work.kind.label,
-                    work.cost == null
-                        ? statusLabel(work.status)
-                        : '${money(work.cost!)} د.ل',
-                  ),
-                ),
+        ]),
+        const SizedBox(height: 10),
+        _resultSection('تفاصيل المصنعية والخدمات', [
+          if (result.services.isEmpty)
+            const Text('لا توجد مصنعية أو خدمات في الحصر الحالي.'),
+          for (final line in result.services) ...[
+            DetailPair(
+              '${line.kind.label} • ${line.label}',
+              '${money(line.cost)} د.ل',
+            ),
+            Text(
+              '${measure(line.quantity)} ${line.unit.label} × ${money(line.unitPrice)} د.ل',
+              style: const TextStyle(color: secondaryText),
+            ),
+            if (line.reviewBasis)
+              const Text(
+                'أساس التسعير قابل للمراجعة',
+                style: TextStyle(color: Color(0xFF86531A), fontSize: 12),
+              ),
+            const Divider(),
+          ],
+        ]),
+        const SizedBox(height: 10),
+        _resultSection('تفاصيل الحسابات', [
+          for (final work in result.works)
+            if (work.lines.isNotEmpty) ...[
+              SectionHeading('${work.kind.label} • ${work.entry.model!.name}'),
+              for (final line in work.lines) _calculatedLine(line),
             ],
-          ),
-        ),
+          if (result.works.every((work) => work.lines.isEmpty))
+            const Text('لا توجد سطور محسوبة للعرض.'),
+          if (result.notes.isNotEmpty) ...[
+            const SectionHeading('ملاحظات الحساب'),
+            for (final note in result.notes) Notice(note),
+          ],
+        ]),
         const SizedBox(height: 20),
         OutlinedButton.icon(
           key: const ValueKey('export_project_pdf'),
-          onPressed: _exporting ? null : _export,
+          onPressed: _exporting || quotation == null ? null : _export,
           icon: _exporting
               ? const SizedBox(
                   width: 20,
                   height: 20,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
-              : Icon(kIsWeb ? Icons.download_outlined : Icons.share_outlined),
+              : Icon(
+                  shareAvailable
+                      ? Icons.share_outlined
+                      : Icons.download_outlined,
+                ),
           label: Text(
             _exporting
                 ? 'جارٍ تجهيز التقرير…'
-                : kIsWeb
-                ? 'تنزيل PDF'
-                : 'مشاركة PDF',
+                : shareAvailable
+                ? 'مشاركة التقرير PDF'
+                : 'تنزيل التقرير PDF',
           ),
         ),
       ],
     );
   }
+
+  Widget _resultSection(String title, List<Widget> children) => SurfaceCard(
+    padding: EdgeInsets.zero,
+    child: ExpansionTile(
+      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+      childrenPadding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+      expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
+      children: children,
+    ),
+  );
+
+  Widget _calculatedLine(CalculatedLine line) => Padding(
+    padding: const EdgeInsets.only(top: 8, bottom: 14),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        DetailPair(line.label, '${money(line.cost)} د.ل', bold: true),
+        Text(
+          '${quantitySourceLabel(line.row.quantitySource)}: '
+          '${measure(line.inputQuantity)} ${line.inputUnit.label}',
+        ),
+        Text(
+          '${measure(line.inputQuantity)} × ${measure(line.row.coefficient)}'
+          '${line.row.divisor == 1 ? '' : ' ÷ ${measure(line.row.divisor)}'}'
+          ' = ${measure(line.quantity)} ${line.unit.label}',
+          style: const TextStyle(color: secondaryText),
+        ),
+        Text('سعر الوحدة: ${money(line.unitPrice)} د.ل'),
+        if (line.overridden)
+          const Text(
+            'سعر مخصص لهذا السطر',
+            style: TextStyle(color: secondaryText, fontSize: 12),
+          ),
+        const SizedBox(height: 12),
+        const Divider(),
+      ],
+    ),
+  );
 }
 
 class _MetadataDialog extends StatefulWidget {

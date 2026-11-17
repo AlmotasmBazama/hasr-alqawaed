@@ -53,7 +53,7 @@ class _BrowserPdfFile implements PdfFileActions {
     try {
       // Deliberately call share before the first await, inside the fresh click.
       await web.window.navigator
-          .share(web.ShareData(files: [_file].toJS, title: 'تقرير حصر القواعد'))
+          .share(web.ShareData(files: [_file].toJS, title: 'تقرير الحصر'))
           .toDart;
       return true;
     } catch (error) {
