@@ -193,7 +193,7 @@ void main() {
       await tester.tap(calculate);
       await tester.pumpAndSettle();
       expect(find.text('86,364.20'), findsOneWidget);
-      expect(tester.widget<OutlinedButton>(export).onPressed, isNotNull);
+      expect(tester.widget<ButtonStyleButton>(export).onPressed, isNotNull);
 
       await tester.tap(find.byKey(const ValueKey('tab_project')));
       await tester.pumpAndSettle();

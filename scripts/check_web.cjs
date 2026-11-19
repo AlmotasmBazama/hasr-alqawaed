@@ -113,6 +113,7 @@ async function session(browser, options = baseOptions) {
     return dest;
   }
   async function screenshot(name) {
+    await page.waitForTimeout(250); // Capture the settled view after tab transitions.
     await page.screenshot({ path: path.join(output, prefix + '-' + name + '.png') });
   }
   return { context, page, open, tab, snapshot, button, textbox, getState, includes, addSample, download, screenshot, seek, enter, scroll };
@@ -156,6 +157,7 @@ function logFailures(page, errors) {
     await s.includes('لم يُحسب المشروع بعد');
     assert.equal(await s.button(pdfAction).count(), 0);
     await s.tab('الكميات');
+    await s.screenshot('desktop-quantities');
     await s.button('احسب المشروع').press('Enter');
     await s.includes('86,364.20');
     await s.includes('66,656.20');

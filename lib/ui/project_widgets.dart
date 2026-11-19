@@ -5,6 +5,8 @@ import '../project/engine.dart';
 import '../project/models.dart';
 import 'app_theme.dart';
 
+export 'foundation_study.dart';
+
 String money(num value) {
   final text = formatNumber(value);
   if (!value.isFinite) return text;
@@ -121,7 +123,12 @@ class _NumberInputState extends State<NumberInput> {
           vertical: 12,
         ),
       ),
-      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+      style: const TextStyle(
+        fontSize: 18,
+        color: forestInk,
+        fontFeatures: [FontFeature.tabularFigures()],
+        fontWeight: FontWeight.w700,
+      ),
     ),
   );
 }
@@ -135,8 +142,9 @@ class Notice extends StatelessWidget {
     margin: const EdgeInsets.only(top: 10),
     padding: const EdgeInsets.all(12),
     decoration: BoxDecoration(
-      color: const Color(0xFFFFEFC9),
-      borderRadius: BorderRadius.circular(12),
+      color: const Color(0xFFFFF6E4),
+      border: Border.all(color: const Color(0xFFF0DCAE)),
+      borderRadius: BorderRadius.circular(14),
     ),
     child: Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -171,10 +179,14 @@ class TotalCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
     width: double.infinity,
-    padding: EdgeInsets.all(large ? 22 : 16),
+    padding: EdgeInsets.all(large ? 24 : 16),
     decoration: BoxDecoration(
-      color: primaryGreen,
-      borderRadius: BorderRadius.circular(16),
+      gradient: const LinearGradient(
+        begin: Alignment.topRight,
+        end: Alignment.bottomLeft,
+        colors: [Color(0xFF153E33), Color(0xFF246B57)],
+      ),
+      borderRadius: BorderRadius.circular(22),
     ),
     child: Column(
       children: [
@@ -194,7 +206,8 @@ class TotalCard extends StatelessWidget {
             textDirection: TextDirection.ltr,
             textAlign: TextAlign.center,
             style: TextStyle(
-              fontSize: large ? 36 : 25,
+              fontFeatures: const [FontFeature.tabularFigures()],
+              fontSize: large ? 42 : 27,
               height: 1.4,
               color: Colors.white,
               fontWeight: FontWeight.w700,
@@ -256,10 +269,15 @@ class ProjectBody extends StatelessWidget {
   Widget build(BuildContext context) => SingleChildScrollView(
     controller: controller,
     keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-    padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+    padding: EdgeInsets.fromLTRB(
+      16,
+      MediaQuery.sizeOf(context).width >= 900 ? 24 : 12,
+      16,
+      32,
+    ),
     child: Center(
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 650),
+        constraints: const BoxConstraints(maxWidth: 1100),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: children,
