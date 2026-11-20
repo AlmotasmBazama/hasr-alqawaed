@@ -64,7 +64,7 @@ void main() {
         controller.result.work(WorkKind.tieBeam).status,
         WorkStatus.needsData,
       );
-      expect(controller.result.totalCost, closeTo(67280.2, .000001));
+      expect(controller.result.totalCost, closeTo(41267.2, .000001));
       expect(snapshot.totalCost, closeTo(86364.2, .000001));
       await controller.saveNow();
       expect(store.saved.currentProject.work(WorkKind.tieBeam).quantity, 130);
@@ -292,6 +292,79 @@ void main() {
       await tester.enterText(quantity, '٠');
       await tester.pumpAndSettle();
       expect(find.text('لا توجد كمية'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'masonry lengths follow a single field and support a per-row custom length',
+    (tester) async {
+      final store = MemoryStore(project: createProject(id: 'group'));
+      await tester.pumpWidget(
+        HasrApp(repository: ProjectRepository(store: store)),
+      );
+      await tester.pumpAndSettle();
+      final beam = field('group:quantity:tieBeam');
+      final upper = field('group:quantity:aboveMasonry');
+      Future<void> tapKey(String key) async {
+        final target = find.byKey(ValueKey(key));
+        await reveal(tester, target);
+        await tester.tap(target);
+        await tester.pumpAndSettle();
+      }
+
+      Future<void> enter(Finder input, String value) async {
+        await reveal(tester, input);
+        await tester.enterText(input, value);
+        await tester.pumpAndSettle();
+      }
+
+      expect(upper, findsNothing);
+      await enter(beam, '١٣٠');
+      expect(
+        find.text('مباني تحت الكتينة: 130 م — نفس طول الميدة'),
+        findsOneWidget,
+      );
+      expect(
+        find.text('مباني فوق الكتينة: 130 م — نفس طول الميدة'),
+        findsOneWidget,
+      );
+      await tapKey('edit_length_aboveMasonry');
+      await enter(upper, '١٧٠');
+      await enter(beam, '١٦٠');
+      expect(
+        find.text('مباني تحت الكتينة: 160 م — نفس طول الميدة'),
+        findsOneWidget,
+      );
+      expect(find.text('مباني فوق الكتينة: 170 م — طول مخصص'), findsOneWidget);
+      await tapKey('include_belowMasonry');
+      await enter(beam, '');
+      expect(find.text('مباني فوق الكتينة: 170 م — طول مخصص'), findsOneWidget);
+      expect(
+        find.text('مباني تحت الكتينة: يحتاج طول الميدة — نفس طول الميدة'),
+        findsOneWidget,
+      );
+      await enter(beam, '٠');
+      expect(
+        find.text('مباني تحت الكتينة: 0 م — نفس طول الميدة'),
+        findsOneWidget,
+      );
+      await tapKey('relink_aboveMasonry');
+      expect(upper, findsNothing);
+      expect(
+        find.text('مباني فوق الكتينة: 0 م — نفس طول الميدة'),
+        findsOneWidget,
+      );
+      await enter(beam, '١٥٠');
+      expect(
+        find.text('مباني فوق الكتينة: 150 م — نفس طول الميدة'),
+        findsOneWidget,
+      );
+      expect(
+        store.saved.currentProject
+            .work(WorkKind.belowMasonry)
+            .explicitlyExcluded,
+        isTrue,
+      );
     },
   );
 

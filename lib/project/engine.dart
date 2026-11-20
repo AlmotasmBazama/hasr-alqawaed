@@ -244,7 +244,11 @@ ProjectResult calculateProject(Project project) {
   final services = <CalculatedLine>[];
   var materialCost = 0.0;
   var serviceCost = 0.0;
-  for (final entry in project.works) {
+  for (final work in project.works) {
+    final quantity = project.effectiveQuantity(work.kind);
+    // A linked row derives its measure from the beam even when the beam's own
+    // costs are excluded. Explicit work exclusions always take precedence.
+    final entry = work.copyWith(quantity: quantity);
     var result = _calculateWork(project, entry);
     if (result.status == WorkStatus.calculated) {
       // Check aggregate overflow before accepting the entire work atomically.

@@ -2,6 +2,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
+const checkMasonry = require('./check_masonry.cjs');
 const { chromium } = require(process.env.HASR_PLAYWRIGHT_PATH || 'playwright');
 
 const url = process.argv[2];
@@ -138,6 +139,12 @@ function logFailures(page, errors) {
   const s = await session(browser);
   logFailures(s.page, errors);
   try {
+    if (process.argv.includes('--masonry-only')) {
+      const pdf = await checkMasonry(browser, session, logFailures, errors);
+      assert.deepEqual(errors, []);
+      console.log(JSON.stringify({ url, passed: true, pdf }));
+      return;
+    }
     await s.context.addInitScript(({ data, key }) => {
       if (!localStorage.getItem(key)) localStorage.setItem(key, JSON.stringify(JSON.stringify(data)));
     }, { data: legacy, key: v1Key });
@@ -240,6 +247,7 @@ function logFailures(page, errors) {
     delete p.materialPrices.hollowBlock;
     for (const property of ['inputDrafts', 'profitPercentage', 'calculatedProject', 'calculationStale']) delete p[property];
     for (const work of p.works) {
+      delete work.linkedToTieBeam;
       delete work.roofBeamLength;
       delete work.explicitlyExcluded;
       for (const row of work.model?.rows ?? []) delete row.quantitySource;
@@ -291,8 +299,11 @@ function logFailures(page, errors) {
     await share.context.close();
     checks.push('shareCapableBrowserPdfApiWithStub');
 
+    const mixedPdf = await checkMasonry(browser, session, logFailures, errors);
+    checks.push('linkedAndCustomLengthsAcrossReload', 'exclusionsAndExplicitZero', 'mixedMasonryPdf');
+    if (process.env.HASR_PREVIOUS_WEB_FIXTURE) checks.push('releasedV31PreservesEqualIndependentLengths');
     assert.deepEqual(errors, []);
-    const result = { url, passed: true, checks, oldPdf, fullPdf, mobilePdf, partialPdf, errors };
+    const result = { url, passed: true, checks, oldPdf, fullPdf, mobilePdf, partialPdf, mixedPdf, errors };
     fs.writeFileSync(path.join(output, prefix + '-results.json'), JSON.stringify(result, null, 2));
     console.log(JSON.stringify(result, null, 2));
   } catch (error) {

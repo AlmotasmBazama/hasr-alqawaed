@@ -321,6 +321,7 @@ Project createProject({
   String name = 'مشروع جديد',
   String? date,
   String location = '',
+  bool linkMasonry = true,
 }) => Project(
   id: id ?? newProjectId(),
   name: name,
@@ -332,6 +333,7 @@ Project createProject({
         kind: kind,
         included: false,
         explicitlyExcluded: false,
+        linkedToTieBeam: kind.isMasonry && linkMasonry,
         model: defaultModel(kind),
       ),
   ],
@@ -428,6 +430,7 @@ ProjectState migrateLegacyState(legacy.AppData data) {
   final project = createProject(
     id: 'migrated-project-v1',
     name: 'مشروعي السابق',
+    linkMasonry: false,
   );
   final prices = data.inputs.prices;
   final selected = convertFoundationModel(data.selectedModel);

@@ -11,6 +11,7 @@ import '../services/browser_pdf.dart';
 import '../services/project_report_service.dart';
 import 'app_theme.dart';
 import 'finance_widgets.dart';
+import 'masonry_lengths.dart';
 import 'pdf_export_dialog.dart';
 import 'project_picker.dart';
 import 'project_widgets.dart';
@@ -284,34 +285,45 @@ class _ProjectShellState extends State<ProjectShell>
             final paired =
                 bounds.maxWidth >= 720 &&
                 MediaQuery.textScalerOf(context).scale(1) <= 1.3;
-            if (!paired) {
-              return Column(
-                children: [
-                  for (final kind in WorkKind.values)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: _workRow(result.work(kind)),
-                    ),
-                ],
-              );
-            }
-            final kinds = WorkKind.values
-                .where((kind) => kind != WorkKind.roof)
-                .toList();
+            final lengths = MasonryLengths(
+              controller: controller,
+              result: result,
+              details: _details,
+            );
+            final foundations = _workRow(result.work(WorkKind.foundations));
+            final leanSlab = _workRow(result.work(WorkKind.leanSlab));
+            final columns = _workRow(result.work(WorkKind.columns));
             return Column(
               children: [
-                for (var i = 0; i < kinds.length; i += 2)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 12),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(child: _workRow(result.work(kinds[i]))),
-                        const SizedBox(width: 12),
-                        Expanded(child: _workRow(result.work(kinds[i + 1]))),
-                      ],
-                    ),
-                  ),
+                if (paired)
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Expanded(child: lengths),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          children: [
+                            foundations,
+                            const SizedBox(height: 10),
+                            leanSlab,
+                            const SizedBox(height: 10),
+                            columns,
+                          ],
+                        ),
+                      ),
+                    ],
+                  )
+                else ...[
+                  foundations,
+                  const SizedBox(height: 10),
+                  lengths,
+                  const SizedBox(height: 10),
+                  leanSlab,
+                  const SizedBox(height: 10),
+                  columns,
+                ],
+                const SizedBox(height: 12),
                 _workRow(result.work(WorkKind.roof)),
               ],
             );
@@ -813,6 +825,14 @@ class _ProjectShellState extends State<ProjectShell>
           for (final work in result.works)
             if (work.lines.isNotEmpty) ...[
               SectionHeading('${work.kind.label} • ${work.entry.model!.name}'),
+              if (work.kind.isMasonry)
+                Text(
+                  masonryLengthSummary(work.entry),
+                  style: const TextStyle(
+                    color: primaryGreen,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
               for (final line in work.lines) _calculatedLine(line),
             ],
           if (result.works.every((work) => work.lines.isEmpty))

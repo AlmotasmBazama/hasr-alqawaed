@@ -311,6 +311,15 @@ class ProjectReportService {
 
   static pw.Widget _inputDetails(WorkResult work) {
     final entry = work.entry;
+    if (work.kind.isMasonry) {
+      return pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+        children: [
+          _valueAndUnit(entry.quantity, entry.inputUnit, size: 9),
+          _ar(_lengthSource(entry), size: 8, color: _muted),
+        ],
+      );
+    }
     if (work.kind != WorkKind.roof || entry.inputUnit != QuantityUnit.area) {
       return _valueAndUnit(entry.quantity, entry.inputUnit, size: 9);
     }
@@ -328,12 +337,21 @@ class ProjectReportService {
     );
   }
 
+  static String _lengthSource(WorkEntry entry) =>
+      entry.linkedToTieBeam ? 'الطول مرتبط بالميدة' : 'طول مخصص';
+
   static List<pw.Widget> _workDetails(WorkResult work) {
     final description = work.entry.model?.description ?? '';
     return [
       pw.NewPage(freeSpace: 145),
       _heading(work.label, size: 12),
       _ar(work.entry.model!.name, strong: true),
+      if (work.kind.isMasonry)
+        _ar(
+          '${_lengthSource(work.entry)} • ${_quantity(work.entry.quantity!)} ${work.entry.inputUnit.label}',
+          size: 9,
+          color: _green,
+        ),
       if (description.isNotEmpty) _ar(description, size: 9, color: _muted),
       pw.SizedBox(height: 6),
       _table(

@@ -151,16 +151,48 @@ class ProjectController extends ChangeNotifier {
 
   void quantity(WorkKind kind, String raw) {
     if (!editable) return;
+    // Linked masonry has no writable independent input.
+    if (savedProject.work(kind).linkedToTieBeam) return;
     final number = parseQuantity(kind, raw);
     var next = _withDraft(savedProject, 'quantity:${kind.name}', raw, number);
     if (number != null) {
+      final entry = next.work(kind);
+      final keepExcluded =
+          (kind.isMasonry || kind == WorkKind.tieBeam) &&
+          entry.explicitlyExcluded;
       next = next.updateWork(
-        next
-            .work(kind)
-            .copyWith(quantity: number, included: number > 0 ? true : null),
+        entry.copyWith(
+          quantity: number,
+          included: number > 0 && !keepExcluded ? true : null,
+        ),
       );
+      if (kind == WorkKind.tieBeam && number > 0) {
+        for (final item in next.works.where(
+          (w) => w.linkedToTieBeam && !w.explicitlyExcluded && !w.included,
+        )) {
+          next = next.updateWork(item.copyWith(included: true));
+        }
+      }
     }
     _changed(next);
+  }
+
+  void setLinkedToTieBeam(WorkKind kind, bool linked) {
+    if (!editable || !kind.isMasonry) return;
+    final entry = savedProject.work(kind);
+    if (entry.linkedToTieBeam == linked) return;
+    final length = savedProject.effectiveQuantity(WorkKind.tieBeam);
+    final field = 'quantity:${kind.name}';
+    _drafts.remove(_key(field));
+    final drafts = {...savedProject.inputDrafts}..remove(field);
+    final updated = entry.copyWith(
+      linkedToTieBeam: linked,
+      quantity: linked ? entry.quantity : length,
+      included: length != null && length > 0 && !entry.explicitlyExcluded
+          ? true
+          : null,
+    );
+    _changed(savedProject.updateWork(updated).copyWith(inputDrafts: drafts));
   }
 
   void roofBeamLength(String raw) {

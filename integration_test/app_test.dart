@@ -178,6 +178,21 @@ void main() {
         );
         await tapKey('recalculate_project');
         expect(find.text('165,683.50'), findsOneWidget);
+        await tapKey('tab_project');
+        await enter('$fullId:quantity:tieBeam', '١٦٠');
+        expect(
+          find.text('مباني تحت الكتينة: 160 م — نفس طول الميدة'),
+          findsOneWidget,
+        );
+        expect(
+          find.text('مباني فوق الكتينة: 160 م — نفس طول الميدة'),
+          findsOneWidget,
+        );
+        await tapKey('tab_results');
+        expect(find.byKey(const ValueKey('export_project_pdf')), findsNothing);
+        await tapKey('recalculate_project');
+        // The three linear costs increase by 30 × (49.1 + 146.8 + 151).
+        expect(find.text('177,339.34'), findsOneWidget);
         expect(tester.takeException(), isNull);
       } finally {
         await tester.pumpWidget(const SizedBox.shrink());

@@ -75,6 +75,39 @@ void main() {
   );
 
   test(
+    'mixed masonry lengths use the frozen effective inputs in the report',
+    () async {
+      final project = createExampleProject(id: 'masonry-report');
+      final mixed = project
+          .updateWork(project.work(WorkKind.tieBeam).copyWith(quantity: 160))
+          .updateWork(
+            project
+                .work(WorkKind.belowMasonry)
+                .copyWith(linkedToTieBeam: true, quantity: 23),
+          )
+          .updateWork(
+            project
+                .work(WorkKind.aboveMasonry)
+                .copyWith(linkedToTieBeam: false, quantity: 170),
+          );
+      final snapshot = calculateProject(mixed);
+      final below = snapshot.work(WorkKind.belowMasonry);
+      final above = snapshot.work(WorkKind.aboveMasonry);
+      expect(below.entry.quantity, 160);
+      expect(above.entry.quantity, 170);
+      expect(below.lines.first.quantity, 1600);
+      expect(above.lines.first.quantity, 6375);
+      final bytes = await ProjectReportService.generate(snapshot);
+      expect(String.fromCharCodes(bytes.take(5)), '%PDF-');
+      if (const bool.fromEnvironment('GENERATE_SAMPLE')) {
+        final file = File('output/pdf/linked-masonry-mixed.pdf');
+        await file.parent.create(recursive: true);
+        await file.writeAsBytes(bytes);
+      }
+    },
+  );
+
+  test(
     'long dynamic tables span pages and incomplete inputs export no stale cost',
     () async {
       final project = createExampleProject(id: 'long-report');

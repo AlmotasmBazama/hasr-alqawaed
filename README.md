@@ -14,6 +14,7 @@ The **[original foundation-only app (v1)](https://hasr-alqawaed-v1.web.app/)** r
 
 - Three screens: quantities, prices and profit, and results.
 - Foundations, below-tie masonry, tie beams, lean slabs, columns, above-tie masonry, and a built-in 25 cm roof model with independent area and beam length.
+- New projects use the tie beam length for both masonry items. Each item can have its own length or be linked again. Older projects keep their independent lengths, and explicitly excluded items stay out of the estimate. The report identifies the length and its source for each masonry item.
 - Dynamic material/service rows, editable coefficients and divisors, and labelled pricing units.
 - Independent project prices and model snapshots, with explicit per-row price overrides.
 - Material aggregation by identity, specification and unit. Costs sum actual line costs; labor quantities retain their work category and pricing unit.

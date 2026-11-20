@@ -39,6 +39,7 @@ enum WorkKind {
   final String label;
   final QuantityUnit defaultUnit;
   bool get integerQuantity => this == foundations || this == columns;
+  bool get isMasonry => this == belowMasonry || this == aboveMasonry;
 }
 
 class MaterialDefinition {
@@ -235,6 +236,7 @@ class WorkEntry {
     required this.included,
     bool? explicitlyExcluded,
     this.quantity,
+    this.linkedToTieBeam = false,
     this.roofBeamLength,
     this.model,
     Map<String, double?> priceOverrides = const {},
@@ -244,6 +246,7 @@ class WorkEntry {
   final bool included;
   final bool explicitlyExcluded;
   final double? quantity;
+  final bool linkedToTieBeam;
   final double? roofBeamLength;
   final WorkModel? model;
   final Map<String, double?> priceOverrides;
@@ -268,6 +271,7 @@ class WorkEntry {
     bool? included,
     bool? explicitlyExcluded,
     Object? quantity = _unchanged,
+    bool? linkedToTieBeam,
     Object? roofBeamLength = _unchanged,
     Object? model = _unchanged,
     Map<String, double?>? priceOverrides,
@@ -280,6 +284,7 @@ class WorkEntry {
     quantity: identical(quantity, _unchanged)
         ? this.quantity
         : (quantity as num?)?.toDouble(),
+    linkedToTieBeam: linkedToTieBeam ?? this.linkedToTieBeam,
     roofBeamLength: identical(roofBeamLength, _unchanged)
         ? this.roofBeamLength
         : (roofBeamLength as num?)?.toDouble(),
@@ -291,6 +296,7 @@ class WorkEntry {
     'included': included,
     'explicitlyExcluded': explicitlyExcluded,
     'quantity': quantity,
+    if (kind.isMasonry) 'linkedToTieBeam': linkedToTieBeam,
     'roofBeamLength': roofBeamLength,
     'model': model?.toJson(),
     'priceOverrides': priceOverrides,
@@ -303,6 +309,10 @@ class WorkEntry {
           ? _bool(json, 'explicitlyExcluded')
           : null,
       quantity: _nullableNumber(json['quantity']),
+      // Previous projects and their saved quotations used independent lengths.
+      linkedToTieBeam: json.containsKey('linkedToTieBeam')
+          ? _bool(json, 'linkedToTieBeam')
+          : false,
       roofBeamLength: _nullableNumber(json['roofBeamLength']),
       model: json['model'] == null
           ? null
@@ -311,6 +321,7 @@ class WorkEntry {
     );
     if ((entry.quantity != null && !entry.quantityValid) ||
         (entry.included && entry.explicitlyExcluded) ||
+        (entry.linkedToTieBeam && !entry.kind.isMasonry) ||
         (entry.kind != WorkKind.roof && entry.roofBeamLength != null) ||
         (entry.model != null && entry.model!.kind != entry.kind)) {
       throw const FormatException('Invalid work entry');
@@ -357,6 +368,13 @@ class Project {
   final bool calculationStale;
   WorkEntry work(WorkKind kind) =>
       works.firstWhere((entry) => entry.kind == kind);
+
+  double? effectiveQuantity(WorkKind kind) {
+    final source = work(kind).linkedToTieBeam ? WorkKind.tieBeam : kind;
+    if (inputDrafts.containsKey('quantity:${source.name}')) return null;
+    return work(source).quantity;
+  }
+
   Project updateWork(WorkEntry entry) => copyWith(
     works: [for (final item in works) item.kind == entry.kind ? entry : item],
   );
