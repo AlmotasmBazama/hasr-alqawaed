@@ -1,6 +1,19 @@
 import 'package:flutter/material.dart';
 
 import 'app_theme.dart';
+import 'field_help.dart';
+
+const sharedPriceHelp =
+    'تخص هذه الأسعار المشروع الحالي، وتُستخدم في السطور التي تعتمد السعر المشترك.';
+const overridePriceHelp =
+    'هذا السعر يخص هذا السطر فقط. يمكنك إلغاء التخصيص لاستخدام السعر المشترك.';
+const invalidPriceMessage = 'أدخل قيمة رقمية غير سالبة.';
+
+String unitPriceHelp(String? materialId) => switch (materialId) {
+  'steel14' || 'steel8' || 'steel6' =>
+    'يحوّل التطبيق كمية الحديد حسب معاملات النموذج المختار. أدخل السعر للوحدة الموضحة بجوار الحقل.',
+  _ => 'أدخل سعر وحدة واحدة وفق الوحدة الموضحة بجوار الحقل.',
+};
 
 /// The summary precedes the ledger on a phone and sits alongside it on a desk.
 class FinanceWorkspace extends StatelessWidget {
@@ -36,10 +49,11 @@ class FinanceWorkspace extends StatelessWidget {
 }
 
 class FinanceProjectHeading extends StatelessWidget {
-  const FinanceProjectHeading(this.name, {super.key, this.caption});
+  const FinanceProjectHeading(this.name, {super.key, this.caption, this.help});
 
   final String name;
   final String? caption;
+  final Widget? help;
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -68,6 +82,7 @@ class FinanceProjectHeading extends StatelessWidget {
             ],
           ),
         ),
+        ?help,
       ],
     ),
   );
@@ -116,7 +131,7 @@ class ProfitPanel extends StatelessWidget {
             SizedBox(width: 10),
             Expanded(
               child: Text(
-                'نسبة الربح المضافة إلى التكلفة',
+                'نسبة الربح على التكلفة',
                 style: TextStyle(
                   color: forestInk,
                   fontWeight: FontWeight.w700,
@@ -124,15 +139,17 @@ class ProfitPanel extends StatelessWidget {
                 ),
               ),
             ),
+            FieldHelp(
+              title: 'نسبة الربح على التكلفة',
+              message:
+                  'تُضاف هذه النسبة مرة واحدة إلى إجمالي تكلفة المواد والمصنعية والخدمات.',
+              example:
+                  'تكلفة 1,000 د.ل وربح 10% تعطي ربحًا 100 د.ل، وإجمالي عرض 1,100 د.ل.',
+            ),
           ],
         ),
         const SizedBox(height: 13),
         input,
-        const SizedBox(height: 10),
-        const Text(
-          'تُضاف إلى إجمالي تكلفة المواد والمصنعية والخدمات',
-          style: TextStyle(fontSize: 13, color: secondaryText),
-        ),
       ],
     ),
   );

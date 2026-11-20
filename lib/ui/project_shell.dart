@@ -10,6 +10,7 @@ import '../project/repository.dart';
 import '../services/browser_pdf.dart';
 import '../services/project_report_service.dart';
 import 'app_theme.dart';
+import 'field_help.dart';
 import 'finance_widgets.dart';
 import 'masonry_lengths.dart';
 import 'pdf_export_dialog.dart';
@@ -34,6 +35,9 @@ class _ProjectShellState extends State<ProjectShell>
   int _tab = 0;
   bool _services = false;
   bool _exporting = false;
+  final Set<String> _calculationAttempts = {};
+  bool get _showInputErrors =>
+      _calculationAttempts.contains(controller.savedProject.id);
 
   @override
   void initState() {
@@ -114,7 +118,11 @@ class _ProjectShellState extends State<ProjectShell>
     FocusScope.of(context).unfocus();
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => WorkDetails(controller: controller, kind: kind),
+        builder: (_) => WorkDetails(
+          controller: controller,
+          kind: kind,
+          showInputErrors: _showInputErrors,
+        ),
       ),
     );
   }
@@ -125,6 +133,7 @@ class _ProjectShellState extends State<ProjectShell>
   }
 
   Future<void> _calculate() async {
+    setState(() => _calculationAttempts.add(controller.savedProject.id));
     FocusScope.of(context).unfocus();
     await _action(() async {
       await controller.calculate();
@@ -289,6 +298,7 @@ class _ProjectShellState extends State<ProjectShell>
               controller: controller,
               result: result,
               details: _details,
+              displayErrors: _showInputErrors,
             );
             final foundations = _workRow(result.work(WorkKind.foundations));
             final leanSlab = _workRow(result.work(WorkKind.leanSlab));
@@ -379,9 +389,7 @@ class _ProjectShellState extends State<ProjectShell>
       saved.work(kind).roofBeamLength,
     );
     final roofArea = kind == WorkKind.roof && unit == QuantityUnit.area;
-    final showBeams =
-        kind == WorkKind.roof &&
-        (model == null || model.requiresRoofBeamLength);
+    final showBeams = kind == WorkKind.roof && entry.requiresRoofBeamLength;
     final status =
         result.status == WorkStatus.calculated &&
             (controller.calculatedResult == null ||
@@ -404,8 +412,11 @@ class _ProjectShellState extends State<ProjectShell>
       label: unit.label,
       integer: kind.integerQuantity,
       enabled: controller.editable,
-      error: raw.isNotEmpty && entry.quantity == null
-          ? 'أدخل كمية صالحة'
+      displayErrors: _showInputErrors,
+      error: !entry.explicitlyExcluded && entry.quantity == null
+          ? (kind.integerQuantity
+                ? 'أدخل عددًا صحيحًا غير سالب.'
+                : 'أدخل قيمة رقمية غير سالبة.')
           : null,
       onChanged: (value) => controller.quantity(kind, value),
     );
@@ -415,8 +426,12 @@ class _ProjectShellState extends State<ProjectShell>
       text: beamRaw,
       label: QuantityUnit.linear.label,
       enabled: controller.editable,
-      error: beamRaw.isNotEmpty && entry.roofBeamLength == null
-          ? 'أدخل طولًا صالحًا'
+      displayErrors: _showInputErrors,
+      helperText: 'مستقل عن طول الميدة',
+      error: !entry.explicitlyExcluded && entry.roofBeamLength == null
+          ? (beamRaw.trim().isEmpty
+                ? 'أدخل أطوال الكمرات لإكمال حساب السقف.'
+                : 'أدخل قيمة رقمية غير سالبة.')
           : null,
       onChanged: controller.roofBeamLength,
     );
@@ -425,7 +440,6 @@ class _ProjectShellState extends State<ProjectShell>
       title: title,
       status: status,
       quantity: quantity,
-      showAreaLabel: roofArea,
       beams: showBeams ? beams : null,
       details: () => _details(kind),
       toggleInclusion: controller.editable
@@ -442,19 +456,23 @@ class _ProjectShellState extends State<ProjectShell>
         FinanceProjectHeading(
           project.name,
           caption: 'الأسعار ونسبة الربح تخص هذا المشروع',
+          help: const FieldHelp(
+            title: 'الأسعار المشتركة',
+            message: sharedPriceHelp,
+          ),
         ),
         FinanceWorkspace(
           summary: ProfitPanel(
             input: NumberInput(
-              semanticLabel: 'نسبة الربح المضافة إلى التكلفة',
+              semanticLabel: 'نسبة الربح على التكلفة',
               key: ValueKey('${project.id}:profit_percentage'),
               text: controller.draft(
                 'profitPercentage',
                 controller.savedProject.profitPercentage,
               ),
-              label: 'نسبة الربح',
-              suffixText: '%',
+              label: 'النسبة (%)',
               enabled: controller.editable,
+              displayErrors: _showInputErrors,
               error: project.profitPercentage == null
                   ? 'أدخل نسبة من 0 إلى ${measure(maxProfitPercentage)}'
                   : null,
@@ -503,6 +521,8 @@ class _ProjectShellState extends State<ProjectShell>
               _priceRow(
                 label: material.label,
                 unit: material.unit,
+                helpTitle: 'سعر ${material.label}',
+                materialId: material.id,
                 input: NumberInput(
                   semanticLabel: 'سعر ${material.label}',
                   key: ValueKey('${project.id}:price:${material.id}'),
@@ -512,8 +532,11 @@ class _ProjectShellState extends State<ProjectShell>
                   ),
                   label: 'السعر',
                   enabled: controller.editable,
-                  error: project.materialPrices[material.id] == null
-                      ? 'سعر غير مكتمل'
+                  displayErrors: _showInputErrors,
+                  error:
+                      project.materialPrices.containsKey(material.id) &&
+                          project.materialPrices[material.id] == null
+                      ? invalidPriceMessage
                       : null,
                   onChanged: (value) =>
                       controller.materialPrice(material.id, value),
@@ -538,6 +561,7 @@ class _ProjectShellState extends State<ProjectShell>
                 _priceRow(
                   label: row.label,
                   unit: row.unit,
+                  helpTitle: 'سعر ${row.label} ${work.kind.label}',
                   input: NumberInput(
                     semanticLabel: 'سعر ${row.label} ${work.kind.label}',
                     key: ValueKey(
@@ -555,8 +579,10 @@ class _ProjectShellState extends State<ProjectShell>
                     ),
                     label: 'السعر',
                     enabled: controller.editable,
+                    displayErrors: _showInputErrors,
                     error:
-                        project.servicePrices.containsKey(
+                        !work.explicitlyExcluded &&
+                            project.servicePrices.containsKey(
                               servicePriceKey(work.kind, row),
                             ) &&
                             project.servicePrices[servicePriceKey(
@@ -564,7 +590,7 @@ class _ProjectShellState extends State<ProjectShell>
                                   row,
                                 )] ==
                                 null
-                        ? 'سعر غير مكتمل'
+                        ? invalidPriceMessage
                         : null,
                     onChanged: (value) =>
                         controller.servicePrice(work.kind, row, value),
@@ -581,21 +607,33 @@ class _ProjectShellState extends State<ProjectShell>
     required String label,
     required QuantityUnit unit,
     required Widget input,
+    required String helpTitle,
+    String? materialId,
   }) => Padding(
     padding: const EdgeInsets.symmetric(vertical: 10),
     child: LayoutBuilder(
       builder: (context, constraints) {
-        final title = Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        final title = Row(
           children: [
-            Text(
-              label,
-              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  Text(
+                    'د.ل / ${unit.shortLabel}',
+                    style: const TextStyle(color: secondaryText, fontSize: 12),
+                  ),
+                ],
+              ),
             ),
-            Text(
-              'د.ل / ${unit.label}',
-              style: const TextStyle(color: secondaryText, fontSize: 12),
-            ),
+            FieldHelp(title: helpTitle, message: unitPriceHelp(materialId)),
           ],
         );
         return constraints.maxWidth < 230 ||
@@ -649,7 +687,7 @@ class _ProjectShellState extends State<ProjectShell>
                     ),
                     Text(
                       stale
-                          ? 'تغيّرت بيانات المشروع بعد آخر حساب. حدّث الحسبة لعرض النتائج وتنزيل التقرير.'
+                          ? 'تغيّرت المدخلات. حدّث الحسبة لإظهار النتائج الجديدة.'
                           : 'أدخل كميات الأعمال والأسعار، ثم اضغط «احسب المشروع» لعرض النتائج.',
                     ),
                     const SizedBox(height: 18),

@@ -3,6 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
 const checkMasonry = require('./check_masonry.cjs');
+const checkHelp = require('./check_help.cjs');
 const { chromium } = require(process.env.HASR_PLAYWRIGHT_PATH || 'playwright');
 
 const url = process.argv[2];
@@ -139,6 +140,12 @@ function logFailures(page, errors) {
   const s = await session(browser);
   logFailures(s.page, errors);
   try {
+    if (process.argv.includes('--help-only')) {
+      await checkHelp(browser, session, logFailures, errors);
+      assert.deepEqual(errors, []);
+      console.log(JSON.stringify({ url, passed: true, checks: ['contextualHelp'] }));
+      return;
+    }
     if (process.argv.includes('--masonry-only')) {
       const pdf = await checkMasonry(browser, session, logFailures, errors);
       assert.deepEqual(errors, []);
@@ -185,7 +192,7 @@ function logFailures(page, errors) {
     const full = await s.addSample(true);
     assert.notEqual(full, old);
     await s.tab('الأسعار والربح');
-    await s.enter(s.textbox(/^نسبة الربح المضافة إلى التكلفة/), '١٠');
+    await s.enter(s.textbox(/^نسبة الربح على التكلفة/), '١٠');
     await s.tab('الكميات');
     await s.button('احسب المشروع').press('Enter');
     for (const amount of ['162,724.87', '120,723.70', '27,208.00', '147,931.70', '14,793.17']) {
@@ -301,6 +308,8 @@ function logFailures(page, errors) {
 
     const mixedPdf = await checkMasonry(browser, session, logFailures, errors);
     checks.push('linkedAndCustomLengthsAcrossReload', 'exclusionsAndExplicitZero', 'mixedMasonryPdf');
+    await checkHelp(browser, session, logFailures, errors);
+    checks.push('contextualHelpWithKeyboardAndTouch', 'hintsKeepSavedState', 'sharedPriceUnitsAndProfitExample');
     if (process.env.HASR_PREVIOUS_WEB_FIXTURE) checks.push('releasedV31PreservesEqualIndependentLengths');
     assert.deepEqual(errors, []);
     const result = { url, passed: true, checks, oldPdf, fullPdf, mobilePdf, partialPdf, mixedPdf, errors };

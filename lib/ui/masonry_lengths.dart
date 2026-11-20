@@ -4,16 +4,13 @@ import '../project/controller.dart';
 import '../project/engine.dart';
 import '../project/models.dart';
 import 'app_theme.dart';
+import 'field_help.dart';
 import 'project_widgets.dart';
 
 String masonryLengthSummary(WorkEntry entry) {
   final value = entry.quantity;
   final basis = entry.linkedToTieBeam ? 'نفس طول الميدة' : 'طول مخصص';
-  final length = value != null
-      ? '${measure(value)} م'
-      : entry.linkedToTieBeam
-      ? 'يحتاج طول الميدة'
-      : 'لم يُحدَّد الطول';
+  final length = value != null ? '${measure(value)} م' : 'لم يُحدَّد الطول';
   return '${entry.kind.label}: $length — $basis';
 }
 
@@ -23,16 +20,21 @@ class MasonryLengths extends StatelessWidget {
     required this.controller,
     required this.result,
     required this.details,
+    required this.displayErrors,
   });
 
   final ProjectController controller;
   final ProjectResult result;
   final ValueChanged<WorkKind> details;
+  final bool displayErrors;
 
   @override
   Widget build(BuildContext context) {
     const kind = WorkKind.tieBeam;
     final entry = result.work(kind).entry;
+    final linkedActive = result.works.any(
+      (w) => w.entry.linkedToTieBeam && !w.entry.explicitlyExcluded,
+    );
     final raw = controller.draft(
       'quantity:tieBeam',
       controller.savedProject.work(kind).quantity,
@@ -49,22 +51,40 @@ class MasonryLengths extends StatelessWidget {
               fontWeight: FontWeight.w700,
             ),
           ),
-          const SizedBox(height: 16),
-          NumberInput(
-            key: ValueKey('${controller.savedProject.id}:quantity:tieBeam'),
-            semanticLabel: 'طول الميدة',
-            label: 'طول الميدة — متر طولي',
-            text: raw,
-            enabled: controller.editable,
-            error: raw.isNotEmpty && entry.quantity == null
-                ? 'أدخل طولًا صالحًا'
-                : null,
-            onChanged: (value) => controller.quantity(kind, value),
+          const SizedBox(height: 12),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: NumberInput(
+                  key: ValueKey(
+                    '${controller.savedProject.id}:quantity:tieBeam',
+                  ),
+                  semanticLabel: 'طول الميدة',
+                  label: 'طول الميدة — ${entry.inputUnit.label}',
+                  text: raw,
+                  enabled: controller.editable,
+                  displayErrors: displayErrors,
+                  error:
+                      entry.quantity == null &&
+                          (!entry.explicitlyExcluded || linkedActive)
+                      ? (raw.trim().isEmpty && linkedActive
+                            ? 'أدخل طول الميدة لتعبئة أطوال المباني المرتبطة به.'
+                            : 'أدخل قيمة رقمية غير سالبة.')
+                      : null,
+                  onChanged: (value) => controller.quantity(kind, value),
+                ),
+              ),
+              const FieldHelp(
+                title: 'طول الميدة',
+                message: 'أدخل مجموع أطوال الميدات بالمتر حسب مخطط المشروع.',
+              ),
+            ],
           ),
           if (entry.explicitlyExcluded)
-            const Text(
-              'بند الميدة غير مطلوب. يبقى الطول متاحًا للمباني المرتبطة.',
-              style: TextStyle(fontSize: 12, color: secondaryText),
+            Text(
+              statusLabel(WorkStatus.excluded),
+              style: const TextStyle(fontSize: 12, color: secondaryText),
             ),
           Wrap(
             alignment: WrapAlignment.spaceBetween,
@@ -83,6 +103,7 @@ class MasonryLengths extends StatelessWidget {
               work: result.work(masonry),
               controller: controller,
               details: () => details(masonry),
+              displayErrors: displayErrors,
             ),
           ],
         ],
@@ -97,10 +118,12 @@ class _MasonryRow extends StatefulWidget {
     required this.work,
     required this.controller,
     required this.details,
+    required this.displayErrors,
   });
   final WorkResult work;
   final ProjectController controller;
   final VoidCallback details;
+  final bool displayErrors;
 
   @override
   State<_MasonryRow> createState() => _MasonryRowState();
@@ -145,6 +168,16 @@ class _MasonryRowState extends State<_MasonryRow> {
                   ),
                 ),
               ),
+              FieldHelp(
+                title: kind.label,
+                message: excluded
+                    ? (linked
+                          ? 'يتبع الطول طول الميدة. اختر «إضافة للحصر» لاستخدام هذا البند.'
+                          : 'يحتفظ البند بطوله المخصص. اختر «إضافة للحصر» لاستخدامه.')
+                    : (linked
+                          ? 'يستخدم هذا البند طول الميدة ويتحدث معه تلقائيًا. اختر تعديل الطول إذا كان طول المباني مختلفًا.'
+                          : 'هذا طول مخصص لا يتغير عند تعديل الميدة. اختر استخدام طول الميدة لإعادة الربط.'),
+              ),
             ],
           ),
           if (excluded ||
@@ -154,7 +187,7 @@ class _MasonryRowState extends State<_MasonryRow> {
             Padding(
               padding: const EdgeInsets.only(top: 3),
               child: Text(
-                excluded ? 'غير مطلوب' : statusLabel(widget.work.status),
+                statusLabel(widget.work.status),
                 style: const TextStyle(color: secondaryText, fontSize: 12),
               ),
             ),
@@ -166,11 +199,12 @@ class _MasonryRowState extends State<_MasonryRow> {
                   '${controller.savedProject.id}:quantity:${kind.name}',
                 ),
                 text: raw,
-                label: 'الطول المخصص — متر طولي',
+                label: 'الطول المخصص — ${entry.inputUnit.label}',
                 semanticLabel: 'طول مخصص ${kind.label}',
                 enabled: controller.editable,
-                error: raw.isNotEmpty && entry.quantity == null
-                    ? 'أدخل طولًا صالحًا'
+                displayErrors: widget.displayErrors,
+                error: entry.quantity == null
+                    ? 'أدخل قيمة رقمية غير سالبة.'
                     : null,
                 onChanged: (value) => controller.quantity(kind, value),
               ),

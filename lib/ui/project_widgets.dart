@@ -18,7 +18,7 @@ String money(num value) {
 String statusLabel(WorkStatus status) => switch (status) {
   WorkStatus.calculated => 'محسوب',
   WorkStatus.needsData => 'يحتاج بيانات',
-  WorkStatus.excluded => 'غير مطلوب',
+  WorkStatus.excluded => 'غير مطلوب — خارج الحساب',
   WorkStatus.noModel => 'يحتاج نموذجًا',
   WorkStatus.zeroQuantity => 'لا توجد كمية',
 };
@@ -51,6 +51,8 @@ class NumberInput extends StatefulWidget {
     required this.onChanged,
     this.semanticLabel,
     this.error,
+    this.helperText,
+    this.displayErrors = false,
     this.suffixText,
     this.enabled = true,
     this.integer = false,
@@ -60,6 +62,8 @@ class NumberInput extends StatefulWidget {
   final ValueChanged<String> onChanged;
   final String? semanticLabel;
   final String? error;
+  final String? helperText;
+  final bool displayErrors;
   final String? suffixText;
   final bool enabled;
   final bool integer;
@@ -71,7 +75,21 @@ class _NumberInputState extends State<NumberInput> {
   late final TextEditingController _controller = TextEditingController(
     text: widget.text,
   );
-  late final FocusNode _focus = FocusNode();
+  final FocusNode _focus = FocusNode();
+  bool _visited = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _focus.addListener(_onFocusChange);
+  }
+
+  void _onFocusChange() {
+    if (mounted && !_focus.hasFocus && !_visited) {
+      setState(() => _visited = true);
+    }
+  }
+
   @override
   void didUpdateWidget(NumberInput oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -97,6 +115,7 @@ class _NumberInputState extends State<NumberInput> {
   @override
   void dispose() {
     _controller.dispose();
+    _focus.removeListener(_onFocusChange);
     _focus.dispose();
     super.dispose();
   }
@@ -108,6 +127,7 @@ class _NumberInputState extends State<NumberInput> {
       controller: _controller,
       focusNode: _focus,
       enabled: widget.enabled,
+      selectAllOnFocus: false,
       textDirection: TextDirection.ltr,
       textAlign: TextAlign.center,
       keyboardType: TextInputType.numberWithOptions(decimal: !widget.integer),
@@ -115,7 +135,9 @@ class _NumberInputState extends State<NumberInput> {
       decoration: InputDecoration(
         labelText: widget.label,
         floatingLabelBehavior: FloatingLabelBehavior.always,
-        errorText: widget.error,
+        errorText: widget.displayErrors || _visited ? widget.error : null,
+        helperText: widget.helperText,
+        helperMaxLines: 4,
         suffixText: widget.suffixText,
         errorMaxLines: 3,
         contentPadding: const EdgeInsets.symmetric(

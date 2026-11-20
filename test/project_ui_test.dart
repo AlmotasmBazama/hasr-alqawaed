@@ -340,9 +340,10 @@ void main() {
       await enter(beam, '');
       expect(find.text('مباني فوق الكتينة: 170 م — طول مخصص'), findsOneWidget);
       expect(
-        find.text('مباني تحت الكتينة: يحتاج طول الميدة — نفس طول الميدة'),
+        find.text('مباني تحت الكتينة: لم يُحدَّد الطول — نفس طول الميدة'),
         findsOneWidget,
       );
+      expect(find.text('غير مطلوب — خارج الحساب'), findsOneWidget);
       await enter(beam, '٠');
       expect(
         find.text('مباني تحت الكتينة: 0 م — نفس طول الميدة'),

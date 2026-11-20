@@ -4,13 +4,21 @@ import '../project/controller.dart';
 import '../project/engine.dart';
 import '../project/models.dart';
 import 'app_theme.dart';
+import 'field_help.dart';
+import 'finance_widgets.dart';
 import 'project_widgets.dart';
 import 'work_model_editor.dart';
 
 class WorkDetails extends StatelessWidget {
-  const WorkDetails({super.key, required this.controller, required this.kind});
+  const WorkDetails({
+    super.key,
+    required this.controller,
+    required this.kind,
+    this.showInputErrors = false,
+  });
   final ProjectController controller;
   final WorkKind kind;
+  final bool showInputErrors;
 
   Future<void> _editor(BuildContext context, WorkModel? model) =>
       Navigator.of(context).push(
@@ -57,9 +65,7 @@ class WorkDetails extends StatelessWidget {
               if (controller.saving) const LinearProgressIndicator(),
               SectionHeading(kind.label),
               if (entry.explicitlyExcluded)
-                const Notice(
-                  'هذا البند غير مطلوب. يمكن إضافته للحصر من الكميات.',
-                ),
+                const Notice('غير مطلوب — خارج الحساب'),
               SurfaceCard(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -95,7 +101,7 @@ class WorkDetails extends StatelessWidget {
                               }
                             : null,
                       ),
-                    if (model == null)
+                    if (model == null && !entry.explicitlyExcluded)
                       const Notice(
                         'ثوابت النموذج غير متاحة. أضف نموذجًا وحدد وحدة المدخل ومواده وخدماته.',
                       ),
@@ -144,6 +150,8 @@ class WorkDetails extends StatelessWidget {
                     'هذه معاملات حصر كمية. لا تُستخدم للتحقق من التصميم الإنشائي أو سلامة التسليح.',
                   ),
                 if (kind == WorkKind.roof &&
+                    !entry.explicitlyExcluded &&
+                    showInputErrors &&
                     model.requiresRoofBeamLength &&
                     (entry.quantity == null ||
                         (entry.quantity! > 0 && entry.roofBeamLength == null)))
@@ -234,15 +242,40 @@ class WorkDetails extends StatelessWidget {
                 style: const TextStyle(fontSize: 12, color: secondaryText),
               ),
             const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    hasOverride ? 'السعر المخصص للسطر' : 'السعر المشترك للسطر',
+                    style: const TextStyle(
+                      color: forestInk,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                FieldHelp(
+                  title: hasOverride
+                      ? 'السعر المخصص للسطر'
+                      : 'السعر المشترك للسطر',
+                  semanticLabel: 'مساعدة حول سعر ${row.label}',
+                  message: hasOverride
+                      ? overridePriceHelp
+                      : '${unitPriceHelp(row.materialId)} تعديل هذا الحقل يخصص السعر لهذا السطر.',
+                ),
+              ],
+            ),
             NumberInput(
               key: ValueKey(
                 '${controller.savedProject.id}:override:${kind.name}:${row.id}',
               ),
               text: raw,
-              label:
-                  '${hasOverride ? 'سعر مخصص للسطر' : 'السعر المشترك'} (د.ل / ${row.unit.label})',
+              label: 'السعر (د.ل / ${row.unit.shortLabel})',
+              semanticLabel: 'سعر ${row.label}',
               enabled: controller.editable,
-              error: price == null ? 'سعر غير مكتمل' : null,
+              displayErrors: showInputErrors,
+              error: !entry.explicitlyExcluded && price == null
+                  ? invalidPriceMessage
+                  : null,
               onChanged: (value) => controller.overridePrice(kind, row, value),
             ),
             if (hasOverride)
@@ -251,14 +284,6 @@ class WorkDetails extends StatelessWidget {
                     ? () => controller.clearOverride(kind, row)
                     : null,
                 child: const Text('إلغاء التخصيص واستخدام السعر المشترك'),
-              )
-            else
-              const Padding(
-                padding: EdgeInsets.only(top: 8),
-                child: Text(
-                  'تعديله هنا يخصص سعر هذا السطر فقط. الأسعار المشتركة من قسم الأسعار.',
-                  style: TextStyle(color: secondaryText, fontSize: 12),
-                ),
               ),
             if (line != null)
               DetailPair('تكلفة السطر', '${money(line.cost)} د.ل', bold: true),

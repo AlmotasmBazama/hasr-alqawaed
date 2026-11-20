@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../project/engine.dart';
 import '../project/models.dart';
 import 'app_theme.dart';
+import 'field_help.dart';
 import 'project_widgets.dart';
 
 class QuantityProjectCard extends StatelessWidget {
@@ -189,7 +190,6 @@ class QuantityWorkCard extends StatelessWidget {
     required this.title,
     required this.status,
     required this.quantity,
-    required this.showAreaLabel,
     this.beams,
     required this.details,
     required this.toggleInclusion,
@@ -199,7 +199,6 @@ class QuantityWorkCard extends StatelessWidget {
   final String title;
   final String status;
   final Widget quantity;
-  final bool showAreaLabel;
   final Widget? beams;
   final VoidCallback details;
   final VoidCallback? toggleInclusion;
@@ -214,12 +213,22 @@ class QuantityWorkCard extends StatelessWidget {
       WorkStatus.needsData || WorkStatus.noModel => const Color(0xFF855A25),
       _ => secondaryText,
     };
-    Widget roofField(String name, Widget field) => Column(
+    Widget roofField(String name, String message, Widget field) => Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          name,
-          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                name,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            FieldHelp(title: name, message: message),
+          ],
         ),
         const SizedBox(height: 8),
         field,
@@ -295,57 +304,78 @@ class QuantityWorkCard extends StatelessWidget {
       child: LayoutBuilder(
         builder: (context, bounds) {
           final scaled = MediaQuery.textScalerOf(context).scale(1);
-          final stacked = scaled > 1.3 || bounds.maxWidth < 230;
+          final stacked = scaled > 1.3 || bounds.maxWidth < 360;
           final displayQuantity = !excluded && kind != WorkKind.roof;
           final separateRoofFields = scaled > 1.25 || bounds.maxWidth < 400;
+          final heading = displayQuantity
+              ? Row(
+                  children: [
+                    Expanded(child: titleBlock),
+                    FieldHelp(
+                      title: title,
+                      message: switch (kind) {
+                        WorkKind.foundations =>
+                          'أدخل عدد القواعد التي سيُطبَّق عليها النموذج المختار.',
+                        WorkKind.columns =>
+                          'أدخل عدد الأعمدة المطلوب حصرها وفق النموذج المختار.',
+                        _ =>
+                          'أدخل المساحة المطلوب حصرها بالمتر المربع. يحسب التطبيق كمية الخرسانة باستخدام معاملات النموذج المختار.',
+                      },
+                    ),
+                  ],
+                )
+              : titleBlock;
+          final roofUnit = result.entry.inputUnit;
+          final roofQuantityField = roofUnit == QuantityUnit.area
+              ? roofField(
+                  'مساحة السقف',
+                  'أدخل مساحة السقف المطلوب حصره بالمتر المربع. يستخدم النموذج هذه المساحة لحساب البنود المرتبطة بها.',
+                  quantity,
+                )
+              : roofField(
+                  roofUnit == QuantityUnit.linear ? 'طول السقف' : 'مقدار السقف',
+                  'أدخل مقدار السقف بوحدة «${roofUnit.label}» حسب النموذج المختار.',
+                  quantity,
+                );
+          final roofBeamField = beams == null
+              ? null
+              : roofField(
+                  'إجمالي أطوال كمرات السقف',
+                  'أدخل مجموع أطوال كمرات السقف بالمتر. هذه القيمة مستقلة عن طول الميدة، ويستخدمها النموذج لحساب البنود المرتبطة بالكمرات.',
+                  beams!,
+                );
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               if (!displayQuantity)
-                titleBlock
+                heading
               else if (stacked) ...[
-                titleBlock,
+                heading,
                 const SizedBox(height: 10),
                 quantity,
               ] else
                 Row(
                   children: [
-                    Expanded(child: titleBlock),
+                    Expanded(child: heading),
                     const SizedBox(width: 10),
-                    SizedBox(
-                      width: bounds.maxWidth > 370 ? 116 : 76,
-                      child: quantity,
-                    ),
+                    SizedBox(width: 136, child: quantity),
                   ],
                 ),
               if (!excluded && kind == WorkKind.roof) ...[
                 const SizedBox(height: 12),
-                if (beams == null)
-                  showAreaLabel ? roofField('مساحة السقف', quantity) : quantity
+                if (roofBeamField == null)
+                  roofQuantityField
                 else if (separateRoofFields) ...[
-                  roofField('مساحة السقف', quantity),
+                  roofQuantityField,
                   const SizedBox(height: 12),
-                  roofField('إجمالي أطوال كمرات السقف', beams!),
+                  roofBeamField,
                 ] else
                   Row(
                     children: [
-                      Expanded(child: roofField('مساحة السقف', quantity)),
+                      Expanded(child: roofQuantityField),
                       const SizedBox(width: 16),
-                      Expanded(
-                        child: roofField('إجمالي أطوال كمرات السقف', beams!),
-                      ),
+                      Expanded(child: roofBeamField),
                     ],
-                  ),
-                if (beams != null &&
-                    (result.entry.quantity == null ||
-                        result.entry.quantity! > 0 &&
-                            result.entry.roofBeamLength == null))
-                  const Padding(
-                    padding: EdgeInsets.only(top: 6),
-                    child: Text(
-                      'أدخل مساحة السقف وأطوال الكمرات.',
-                      style: TextStyle(color: secondaryText, fontSize: 12),
-                    ),
                   ),
               ],
               const SizedBox(height: 9),
