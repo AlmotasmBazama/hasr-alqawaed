@@ -78,7 +78,7 @@ class ProjectReportService {
             pw.NewPage(freeSpace: 155),
             _heading('تفاصيل بنود الأعمال المحسوبة'),
             _ar(
-              'سعر الوحدة وتكلفة السطر بالدينار الليبي. تكاليف البنود قبل الربح.',
+              'تُحسب الكمية بضرب مقدار العمل في معامل الاستهلاك، ثم تُحوّل إلى وحدة التسعير عند الحاجة. الأسعار والتكاليف بالدينار الليبي قبل الربح.',
               size: 9,
               color: _muted,
             ),
@@ -286,59 +286,60 @@ class ProjectReportService {
   }
 
   static pw.Widget _inputs(ProjectResult snapshot) => _table(
-    headers: ['التكلفة قبل الربح', 'الحالة', 'المدخلات', 'بند العمل والنموذج'],
-    widths: const [1.08, .9, 1.7, 1.8],
+    headers: ['التكلفة (د.ل)', 'الحالة', 'القيمة والوحدة', 'المدخل والنموذج'],
+    widths: const [1, .85, 1.35, 2.05],
     rows: [
-      for (final work in snapshot.works)
-        [
-          _number(_money(work.cost), strong: true),
-          _ar(work.status.label, size: 9),
-          _inputDetails(work),
-          pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-            children: [
-              _ar(work.label, strong: true),
-              _ar(
-                work.entry.model?.name ?? 'بلا نموذج',
-                size: 9,
-                color: _muted,
-              ),
-            ],
-          ),
-        ],
+      for (final kind in const [
+        WorkKind.foundations,
+        WorkKind.columns,
+        WorkKind.tieBeam,
+        WorkKind.belowMasonry,
+        WorkKind.aboveMasonry,
+        WorkKind.leanSlab,
+        WorkKind.roof,
+      ])
+        _inputRow(snapshot.work(kind)),
     ],
   );
 
-  static pw.Widget _inputDetails(WorkResult work) {
+  static List<pw.Widget> _inputRow(WorkResult work) {
     final entry = work.entry;
-    if (work.kind.isMasonry) {
-      return pw.Column(
+    return [
+      _number(_money(work.cost), strong: true),
+      _ar(work.status.label, size: 9),
+      pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.stretch,
         children: [
-          _valueAndUnit(entry.quantity, entry.inputUnit, size: 9),
-          _ar(_lengthSource(entry), size: 8, color: _muted),
+          _valueAndUnit(
+            entry.quantity,
+            entry.inputUnit,
+            size: 9,
+            measured: true,
+          ),
+          if (work.kind == WorkKind.roof &&
+              (entry.requiresRoofBeamLength ||
+                  entry.roofBeamLength != null)) ...[
+            _ar('إجمالي أطوال كمرات السقف', size: 8, color: _muted),
+            _valueAndUnit(
+              entry.roofBeamLength,
+              QuantityUnit.linear,
+              size: 9,
+              measured: true,
+            ),
+            if (!entry.requiresRoofBeamLength)
+              _ar('غير مستخدم في النموذج', size: 8, color: _muted),
+          ],
         ],
-      );
-    }
-    if (work.kind != WorkKind.roof || entry.inputUnit != QuantityUnit.area) {
-      return _valueAndUnit(entry.quantity, entry.inputUnit, size: 9);
-    }
-    return pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-      children: [
-        _ar('مساحة السقف', size: 8, color: _muted),
-        _valueAndUnit(entry.quantity, entry.inputUnit, size: 9),
-        _ar('أطوال كمرات السقف', size: 8, color: _muted),
-        if (entry.model != null && !entry.model!.requiresRoofBeamLength)
-          _ar('غير مستخدمة في النموذج', size: 9)
-        else
-          _valueAndUnit(entry.roofBeamLength, QuantityUnit.linear, size: 9),
-      ],
-    );
+      ),
+      pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+        children: [
+          _ar(entry.quantityLabel, strong: true),
+          _ar(entry.model?.name ?? 'بلا نموذج', size: 9, color: _muted),
+        ],
+      ),
+    ];
   }
-
-  static String _lengthSource(WorkEntry entry) =>
-      entry.linkedToTieBeam ? 'الطول مرتبط بالميدة' : 'طول مخصص';
 
   static List<pw.Widget> _workDetails(WorkResult work) {
     final description = work.entry.model?.description ?? '';
@@ -346,12 +347,6 @@ class ProjectReportService {
       pw.NewPage(freeSpace: 145),
       _heading(work.label, size: 12),
       _ar(work.entry.model!.name, strong: true),
-      if (work.kind.isMasonry)
-        _ar(
-          '${_lengthSource(work.entry)} • ${_quantity(work.entry.quantity!)} ${work.entry.inputUnit.label}',
-          size: 9,
-          color: _green,
-        ),
       if (description.isNotEmpty) _ar(description, size: 9, color: _muted),
       pw.SizedBox(height: 6),
       _table(
@@ -396,11 +391,11 @@ class ProjectReportService {
   }
 
   static pw.Widget _lineDetails(CalculatedLine line) {
-    final input = _quantity(line.inputQuantity);
-    final coefficient = _quantity(line.row.coefficient);
+    final input = _measured(line.inputQuantity);
+    final coefficient = _measured(line.row.coefficient);
     final raw = _quantity(line.rawQuantity);
     final quantity = _quantity(line.quantity);
-    final divisor = _quantity(line.row.divisor);
+    final divisor = _measured(line.row.divisor);
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.stretch,
       children: [
@@ -438,10 +433,16 @@ class ProjectReportService {
     double? value,
     QuantityUnit unit, {
     required double size,
+    bool measured = false,
   }) => value == null
       ? _ar('غير مدخل', size: size, color: _muted)
       : _physicalRow([
-          pw.Expanded(child: _number(_quantity(value), size: size)),
+          pw.Expanded(
+            child: _number(
+              measured ? _measured(value) : _quantity(value),
+              size: size,
+            ),
+          ),
           pw.SizedBox(width: 4),
           _ar(unit.label, size: size),
         ]);
@@ -450,13 +451,19 @@ class ProjectReportService {
   static String _date(DateTime time) =>
       '${time.year}-${_pad(time.month)}-${_pad(time.day)}';
 
+  static String _groupWhole(String whole) =>
+      whole.replaceAllMapped(RegExp(r'\B(?=(\d{3})+(?!\d))'), (_) => ',');
+
+  // User measurements and model coefficients retain the stored precision.
+  // Only calculated quantities displayed in the ledger use rounded fractions.
+  static String _measured(double value) => inputNumber(
+    value,
+  ).replaceFirstMapped(RegExp(r'^\d+'), (m) => _groupWhole(m[0]!));
+
   static String _quantity(num value) {
     if (value.abs() >= 1e21) return formatNumber(value);
     final [whole, fraction] = value.toStringAsFixed(6).split('.');
-    final grouped = whole.replaceAllMapped(
-      RegExp(r'\B(?=(\d{3})+(?!\d))'),
-      (_) => ',',
-    );
+    final grouped = _groupWhole(whole);
     final decimals = fraction.replaceFirst(RegExp(r'0+$'), '');
     return decimals.isEmpty ? grouped : '$grouped.$decimals';
   }

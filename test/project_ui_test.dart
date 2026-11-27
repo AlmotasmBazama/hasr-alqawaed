@@ -64,7 +64,7 @@ void main() {
         controller.result.work(WorkKind.tieBeam).status,
         WorkStatus.needsData,
       );
-      expect(controller.result.totalCost, closeTo(41267.2, .000001));
+      expect(controller.result.totalCost, closeTo(67280.2, .000001));
       expect(snapshot.totalCost, closeTo(86364.2, .000001));
       await controller.saveNow();
       expect(store.saved.currentProject.work(WorkKind.tieBeam).quantity, 130);
@@ -264,7 +264,7 @@ void main() {
       await reveal(tester, include);
       await tester.tap(include);
       await tester.pumpAndSettle();
-      expect(quantity, findsNothing);
+      expect(tester.widget<TextField>(quantity).controller!.text, '٢');
       expect(find.text('إضافة للحصر'), findsOneWidget);
       await tester.tap(calculate);
       await tester.pumpAndSettle();
@@ -296,76 +296,96 @@ void main() {
   );
 
   testWidgets(
-    'masonry lengths follow a single field and support a per-row custom length',
+    'independent lengths keep Arabic edits, selection, focus order and saved quote',
     (tester) async {
       final store = MemoryStore(project: createProject(id: 'group'));
-      await tester.pumpWidget(
-        HasrApp(repository: ProjectRepository(store: store)),
+      Future<void> open() async {
+        await tester.pumpWidget(
+          HasrApp(repository: ProjectRepository(store: store)),
+        );
+        await tester.pumpAndSettle();
+      }
+
+      await open();
+      final beam = field('group:quantity:tieBeam');
+      final lower = field('group:quantity:belowMasonry');
+      final upper = field('group:quantity:aboveMasonry');
+      String value(Finder input) =>
+          tester.widget<TextField>(input).controller!.text;
+      Future<void> enter(Finder input, String raw) async {
+        await reveal(tester, input);
+        await tester.enterText(input, raw);
+        await tester.pumpAndSettle();
+      }
+
+      Future<void> tapKey(String key) async {
+        final button = find.byKey(ValueKey(key));
+        await reveal(tester, button);
+        await tester.tap(button);
+        await tester.pumpAndSettle();
+      }
+
+      expect([value(beam), value(lower), value(upper)], ['', '', '']);
+      await enter(upper, '١٢٥٫٧٥');
+      expect([value(beam), value(lower)], ['', '']);
+      final editor = tester.widget<TextField>(upper);
+      editor.controller!.selection = const TextSelection.collapsed(offset: 2);
+      tester.testTextInput.updateEditingValue(
+        const TextEditingValue(
+          text: '١٢٦٫٧٥',
+          selection: TextSelection.collapsed(offset: 3),
+        ),
       );
       await tester.pumpAndSettle();
-      final beam = field('group:quantity:tieBeam');
-      final upper = field('group:quantity:aboveMasonry');
-      Future<void> tapKey(String key) async {
-        final target = find.byKey(ValueKey(key));
-        await reveal(tester, target);
-        await tester.tap(target);
-        await tester.pumpAndSettle();
-      }
+      expect(value(upper), '١٢٦٫٧٥');
+      expect(editor.controller!.selection.extentOffset, 3);
+      expect(editor.focusNode!.hasFocus, isTrue);
+      final help = find.byTooltip('مساعدة حول طول مباني فوق الكتينة');
+      await tester.ensureVisible(help);
+      await tester.tap(help);
+      await tester.pumpAndSettle();
+      expect(
+        find.text('أدخل مجموع أطوال المباني فوق الكتينة بالمتر حسب المخطط.'),
+        findsOneWidget,
+      );
+      await tester.tap(find.text('فهمت'));
+      await tester.pumpAndSettle();
+      expect(editor.controller!.selection.extentOffset, 3);
 
-      Future<void> enter(Finder input, String value) async {
-        await reveal(tester, input);
-        await tester.enterText(input, value);
-        await tester.pumpAndSettle();
-      }
-
-      expect(upper, findsNothing);
+      await enter(upper, '١٦٠');
       await enter(beam, '١٣٠');
-      expect(
-        find.text('مباني تحت الكتينة: 130 م — نفس طول الميدة'),
-        findsOneWidget,
-      );
-      expect(
-        find.text('مباني فوق الكتينة: 130 م — نفس طول الميدة'),
-        findsOneWidget,
-      );
-      await tapKey('edit_length_aboveMasonry');
-      await enter(upper, '١٧٠');
-      await enter(beam, '١٦٠');
-      expect(
-        find.text('مباني تحت الكتينة: 160 م — نفس طول الميدة'),
-        findsOneWidget,
-      );
-      expect(find.text('مباني فوق الكتينة: 170 م — طول مخصص'), findsOneWidget);
-      await tapKey('include_belowMasonry');
-      await enter(beam, '');
-      expect(find.text('مباني فوق الكتينة: 170 م — طول مخصص'), findsOneWidget);
-      expect(
-        find.text('مباني تحت الكتينة: لم يُحدَّد الطول — نفس طول الميدة'),
-        findsOneWidget,
-      );
-      expect(find.text('غير مطلوب — خارج الحساب'), findsOneWidget);
-      await enter(beam, '٠');
-      expect(
-        find.text('مباني تحت الكتينة: 0 م — نفس طول الميدة'),
-        findsOneWidget,
-      );
-      await tapKey('relink_aboveMasonry');
-      expect(upper, findsNothing);
-      expect(
-        find.text('مباني فوق الكتينة: 0 م — نفس طول الميدة'),
-        findsOneWidget,
-      );
+      await tester.testTextInput.receiveAction(TextInputAction.next);
+      await tester.pumpAndSettle();
+      expect(tester.widget<TextField>(lower).focusNode!.hasFocus, isTrue);
+      await enter(lower, '٩٥');
+      await tapKey('calculate_project');
+      await tapKey('tab_project');
       await enter(beam, '١٥٠');
-      expect(
-        find.text('مباني فوق الكتينة: 150 م — نفس طول الميدة'),
-        findsOneWidget,
+      expect([value(beam), value(lower), value(upper)], ['١٥٠', '٩٥', '١٦٠']);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+      await open();
+      expect([value(beam), value(lower), value(upper)], ['150', '95', '160']);
+      await tapKey('tab_results');
+      expect(find.byKey(const ValueKey('export_project_pdf')), findsNothing);
+      await tapKey('recalculate_project');
+      expect(find.byKey(const ValueKey('export_project_pdf')), findsOneWidget);
+      final snapshot = calculateProject(
+        store.saved.currentProject.calculatedProject!,
       );
-      expect(
-        store.saved.currentProject
-            .work(WorkKind.belowMasonry)
-            .explicitlyExcluded,
-        isTrue,
-      );
+      for (final (kind, blocks) in [
+        (WorkKind.belowMasonry, 950),
+        (WorkKind.aboveMasonry, 6000),
+      ]) {
+        expect(
+          snapshot
+              .work(kind)
+              .lines
+              .singleWhere((line) => line.materialId == 'block20')
+              .quantity,
+          blocks,
+        );
+      }
     },
   );
 
@@ -386,8 +406,11 @@ void main() {
       expect(tester.widget<TextField>(beams).controller!.text, '');
       await tester.tap(calculate);
       await tester.pumpAndSettle();
-      final missing = find.textContaining('البنود غير المكتملة:');
-      expect(tester.widget<Text>(missing).data, contains('السقف'));
+      expect(
+        find.text('أدخل أطوال الكمرات لإكمال حساب السقف.'),
+        findsOneWidget,
+      );
+      expect(store.saved.currentProject.calculatedProject, isNull);
 
       await tester.tap(find.byKey(const ValueKey('tab_project')));
       await tester.pumpAndSettle();
@@ -398,7 +421,7 @@ void main() {
       await tester.tap(calculate);
       await tester.pumpAndSettle();
       expect(find.text('46,097.50'), findsOneWidget);
-      expect(tester.widget<Text>(missing).data, isNot(contains('السقف')));
+      expect(find.textContaining('البنود غير المكتملة:'), findsNothing);
     },
   );
 

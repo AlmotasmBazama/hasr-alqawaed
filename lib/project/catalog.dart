@@ -321,7 +321,6 @@ Project createProject({
   String name = 'مشروع جديد',
   String? date,
   String location = '',
-  bool linkMasonry = true,
 }) => Project(
   id: id ?? newProjectId(),
   name: name,
@@ -333,7 +332,6 @@ Project createProject({
         kind: kind,
         included: false,
         explicitlyExcluded: false,
-        linkedToTieBeam: kind.isMasonry && linkMasonry,
         model: defaultModel(kind),
       ),
   ],
@@ -426,11 +424,78 @@ ProjectState migrateProjectStateV2(ProjectState previous) {
   );
 }
 
+/// Materialize measurements using the historical quotation's own inputs before
+/// migrating the editable projects. A dormant manual value in a linked row was
+/// never the measurement consumed by that row.
+ProjectState migrateProjectStateV3(Map<String, dynamic> source) {
+  if (source['version'] != 3) throw const FormatException('Expected schema 3');
+  final state = ProjectState.fromJson({
+    ...source,
+    'version': ProjectState.schemaVersion,
+  });
+
+  Project independent(
+    Project project,
+    Map<String, dynamic> old, {
+    required bool historical,
+  }) {
+    final prior = project.calculatedProject;
+    final snapshot = prior == null
+        ? null
+        : independent(
+            prior,
+            jsonMap(old['calculatedProject']),
+            historical: true,
+          );
+    final drafts = {...project.inputDrafts};
+    final beam = drafts.containsKey('quantity:tieBeam')
+        ? null
+        : project.work(WorkKind.tieBeam).quantity;
+    final works = <WorkEntry>[];
+    for (final raw in old['works'] as List) {
+      final row = jsonMap(raw);
+      final kind = WorkKind.values.byName(row['kind'] as String);
+      final entry = project.work(kind);
+      final linked = row['linkedToTieBeam'] as bool? ?? false;
+      if (!linked) {
+        works.add(entry);
+        continue;
+      }
+      if (!kind.isMasonry) throw const FormatException('Invalid linked work');
+      final quoted = snapshot?.work(kind);
+      final quotedLength = quoted != null && !quoted.explicitlyExcluded
+          ? quoted.quantity
+          : null;
+      final length = quotedLength ?? beam;
+      drafts.remove('quantity:${kind.name}');
+      works.add(
+        entry.copyWith(
+          quantity: length,
+          needsLengthReview: !historical && length != null,
+        ),
+      );
+    }
+    return project.copyWith(
+      works: works,
+      inputDrafts: drafts,
+      calculatedProject: snapshot,
+      legacyIncompleteScope: historical,
+    );
+  }
+
+  final projects = source['projects'] as List;
+  return state.copyWith(
+    projects: [
+      for (var i = 0; i < projects.length; i++)
+        independent(state.projects[i], jsonMap(projects[i]), historical: false),
+    ],
+  );
+}
+
 ProjectState migrateLegacyState(legacy.AppData data) {
   final project = createProject(
     id: 'migrated-project-v1',
     name: 'مشروعي السابق',
-    linkMasonry: false,
   );
   final prices = data.inputs.prices;
   final selected = convertFoundationModel(data.selectedModel);

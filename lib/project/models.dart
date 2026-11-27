@@ -236,7 +236,7 @@ class WorkEntry {
     required this.included,
     bool? explicitlyExcluded,
     this.quantity,
-    this.linkedToTieBeam = false,
+    this.needsLengthReview = false,
     this.roofBeamLength,
     this.model,
     Map<String, double?> priceOverrides = const {},
@@ -246,11 +246,24 @@ class WorkEntry {
   final bool included;
   final bool explicitlyExcluded;
   final double? quantity;
-  final bool linkedToTieBeam;
+  final bool needsLengthReview;
   final double? roofBeamLength;
   final WorkModel? model;
   final Map<String, double?> priceOverrides;
   QuantityUnit get inputUnit => model?.inputUnit ?? kind.defaultUnit;
+  String get quantityLabel => switch (kind) {
+    WorkKind.foundations => 'عدد القواعد',
+    WorkKind.columns => 'عدد الأعمدة',
+    WorkKind.tieBeam => 'طول الميدة',
+    WorkKind.belowMasonry => 'طول مباني تحت الكتينة',
+    WorkKind.aboveMasonry => 'طول مباني فوق الكتينة',
+    WorkKind.leanSlab => 'مساحة الكرسنة',
+    WorkKind.roof => switch (inputUnit) {
+      QuantityUnit.area => 'مساحة السقف',
+      QuantityUnit.linear => 'طول السقف',
+      _ => 'مقدار السقف',
+    },
+  };
   bool get requiresRoofBeamLength => model?.requiresRoofBeamLength ?? false;
   double? quantityFor(QuantitySource source) => switch (source) {
     QuantitySource.workQuantity || QuantitySource.roofArea => quantity,
@@ -271,7 +284,7 @@ class WorkEntry {
     bool? included,
     bool? explicitlyExcluded,
     Object? quantity = _unchanged,
-    bool? linkedToTieBeam,
+    bool? needsLengthReview,
     Object? roofBeamLength = _unchanged,
     Object? model = _unchanged,
     Map<String, double?>? priceOverrides,
@@ -284,7 +297,7 @@ class WorkEntry {
     quantity: identical(quantity, _unchanged)
         ? this.quantity
         : (quantity as num?)?.toDouble(),
-    linkedToTieBeam: linkedToTieBeam ?? this.linkedToTieBeam,
+    needsLengthReview: needsLengthReview ?? this.needsLengthReview,
     roofBeamLength: identical(roofBeamLength, _unchanged)
         ? this.roofBeamLength
         : (roofBeamLength as num?)?.toDouble(),
@@ -296,7 +309,7 @@ class WorkEntry {
     'included': included,
     'explicitlyExcluded': explicitlyExcluded,
     'quantity': quantity,
-    if (kind.isMasonry) 'linkedToTieBeam': linkedToTieBeam,
+    if (needsLengthReview) 'needsLengthReview': true,
     'roofBeamLength': roofBeamLength,
     'model': model?.toJson(),
     'priceOverrides': priceOverrides,
@@ -309,9 +322,8 @@ class WorkEntry {
           ? _bool(json, 'explicitlyExcluded')
           : null,
       quantity: _nullableNumber(json['quantity']),
-      // Previous projects and their saved quotations used independent lengths.
-      linkedToTieBeam: json.containsKey('linkedToTieBeam')
-          ? _bool(json, 'linkedToTieBeam')
+      needsLengthReview: json.containsKey('needsLengthReview')
+          ? _bool(json, 'needsLengthReview')
           : false,
       roofBeamLength: _nullableNumber(json['roofBeamLength']),
       model: json['model'] == null
@@ -321,7 +333,8 @@ class WorkEntry {
     );
     if ((entry.quantity != null && !entry.quantityValid) ||
         (entry.included && entry.explicitlyExcluded) ||
-        (entry.linkedToTieBeam && !entry.kind.isMasonry) ||
+        (entry.needsLengthReview &&
+            (!entry.kind.isMasonry || entry.quantity == null)) ||
         (entry.kind != WorkKind.roof && entry.roofBeamLength != null) ||
         (entry.model != null && entry.model!.kind != entry.kind)) {
       throw const FormatException('Invalid work entry');
@@ -344,6 +357,7 @@ class Project {
     Map<String, String> inputDrafts = const {},
     this.calculatedProject,
     this.calculationStale = false,
+    this.legacyIncompleteScope = false,
   }) : works = List.unmodifiable(works),
        materialPrices = Map.unmodifiable(materialPrices),
        servicePrices = Map.unmodifiable(servicePrices),
@@ -366,14 +380,11 @@ class Project {
   /// Nested calculation snapshots are disallowed when saved or restored.
   final Project? calculatedProject;
   final bool calculationStale;
+
+  /// Older issued quotations counted untouched work as incomplete.
+  final bool legacyIncompleteScope;
   WorkEntry work(WorkKind kind) =>
       works.firstWhere((entry) => entry.kind == kind);
-
-  double? effectiveQuantity(WorkKind kind) {
-    final source = work(kind).linkedToTieBeam ? WorkKind.tieBeam : kind;
-    if (inputDrafts.containsKey('quantity:${source.name}')) return null;
-    return work(source).quantity;
-  }
 
   Project updateWork(WorkEntry entry) => copyWith(
     works: [for (final item in works) item.kind == entry.kind ? entry : item],
@@ -391,6 +402,7 @@ class Project {
     Map<String, String>? inputDrafts,
     Object? calculatedProject = _unchanged,
     bool? calculationStale,
+    bool? legacyIncompleteScope,
   }) => Project(
     id: id ?? this.id,
     name: name ?? this.name,
@@ -408,6 +420,7 @@ class Project {
         ? this.calculatedProject
         : calculatedProject as Project?,
     calculationStale: calculationStale ?? this.calculationStale,
+    legacyIncompleteScope: legacyIncompleteScope ?? this.legacyIncompleteScope,
   );
   Map<String, Object?> toJson() => {
     'id': id,
@@ -422,6 +435,7 @@ class Project {
     'inputDrafts': inputDrafts,
     'calculatedProject': calculatedProject?.toJson(),
     'calculationStale': calculationStale,
+    if (legacyIncompleteScope) 'legacyIncompleteScope': true,
   };
   factory Project.fromJson(Map<String, dynamic> json) {
     final snapshot = json['calculatedProject'] == null
@@ -457,6 +471,9 @@ class Project {
       calculationStale: json.containsKey('calculationStale')
           ? _bool(json, 'calculationStale')
           : false,
+      legacyIncompleteScope: json.containsKey('legacyIncompleteScope')
+          ? _bool(json, 'legacyIncompleteScope')
+          : false,
     );
     if (project.id.trim().isEmpty ||
         project.name.trim().isEmpty ||
@@ -483,7 +500,7 @@ class ProjectState {
     List<WorkModel> customModels = const [],
   }) : projects = List.unmodifiable(projects),
        customModels = List.unmodifiable(customModels);
-  static const schemaVersion = 3;
+  static const schemaVersion = 4;
   final List<Project> projects;
   final String currentProjectId;
   final List<WorkModel> customModels;

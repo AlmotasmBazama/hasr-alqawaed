@@ -75,32 +75,49 @@ void main() {
   );
 
   test(
-    'mixed masonry lengths use the frozen effective inputs in the report',
+    'report uses the saved independent lengths and line quantities',
     () async {
-      final project = createExampleProject(id: 'masonry-report');
-      final mixed = project
-          .updateWork(project.work(WorkKind.tieBeam).copyWith(quantity: 160))
+      final project = createProject(
+        id: 'masonry-report',
+        name: 'حصر أعمال الميدة والمباني',
+      );
+      final entered = project
+          .updateWork(
+            project
+                .work(WorkKind.tieBeam)
+                .copyWith(included: true, quantity: 130),
+          )
           .updateWork(
             project
                 .work(WorkKind.belowMasonry)
-                .copyWith(linkedToTieBeam: true, quantity: 23),
+                .copyWith(included: true, quantity: 95),
           )
           .updateWork(
             project
                 .work(WorkKind.aboveMasonry)
-                .copyWith(linkedToTieBeam: false, quantity: 170),
+                .copyWith(included: true, quantity: 160),
           );
-      final snapshot = calculateProject(mixed);
-      final below = snapshot.work(WorkKind.belowMasonry);
-      final above = snapshot.work(WorkKind.aboveMasonry);
-      expect(below.entry.quantity, 160);
-      expect(above.entry.quantity, 170);
-      expect(below.lines.first.quantity, 1600);
-      expect(above.lines.first.quantity, 6375);
+      final before = calculateProject(entered);
+      final updated = entered.updateWork(
+        entered.work(WorkKind.tieBeam).copyWith(quantity: 150),
+      );
+      final restored = Project.fromJson(
+        updated.toJson().cast<String, dynamic>(),
+      );
+      final snapshot = calculateProject(restored);
+      expect(snapshot.work(WorkKind.tieBeam).entry.quantity, 150);
+      for (final result in [before, snapshot]) {
+        final below = result.work(WorkKind.belowMasonry);
+        final above = result.work(WorkKind.aboveMasonry);
+        expect(below.entry.quantity, 95);
+        expect(above.entry.quantity, 160);
+        expect(below.lines.first.quantity, 950);
+        expect(above.lines.first.quantity, 6000);
+      }
       final bytes = await ProjectReportService.generate(snapshot);
       expect(String.fromCharCodes(bytes.take(5)), '%PDF-');
       if (const bool.fromEnvironment('GENERATE_SAMPLE')) {
-        final file = File('output/pdf/linked-masonry-mixed.pdf');
+        final file = File('output/pdf/independent-lengths.pdf');
         await file.parent.create(recursive: true);
         await file.writeAsBytes(bytes);
       }

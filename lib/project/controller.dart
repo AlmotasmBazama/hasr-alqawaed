@@ -64,11 +64,22 @@ class ProjectController extends ChangeNotifier {
     }
     for (final entry in current.works) {
       var work = entry;
-      if (drafts.containsKey('quantity:${entry.kind.name}')) {
+      final quantityDraft = drafts['quantity:${entry.kind.name}'];
+      final beamDraft = entry.kind == WorkKind.roof
+          ? drafts['roofBeamLength']
+          : null;
+      if (quantityDraft != null) {
         work = work.copyWith(quantity: null);
       }
-      if (entry.kind == WorkKind.roof && drafts.containsKey('roofBeamLength')) {
+      if (beamDraft != null) {
         work = work.copyWith(roofBeamLength: null);
+      }
+      // An attempted invalid number belongs in the partial quotation, even if
+      // this stage has yet to receive its first valid positive measurement.
+      if (!entry.explicitlyExcluded &&
+          ((quantityDraft?.trim().isNotEmpty ?? false) ||
+              (beamDraft?.trim().isNotEmpty ?? false))) {
+        work = work.copyWith(included: true);
       }
       final overrides = Map<String, double?>.of(work.priceOverrides);
       for (final row in work.model?.rows ?? <ModelRow>[]) {
@@ -130,8 +141,10 @@ class ProjectController extends ChangeNotifier {
       ? project
       : project.copyWith(calculationStale: true);
 
-  void _changed(Project project) {
-    state = state!.updateProject(_stale(project));
+  void _changed(Project project, {bool affectsCalculation = true}) {
+    state = state!.updateProject(
+      affectsCalculation ? _stale(project) : project,
+    );
     // Queue the write before notifying the UI, so an immediate browser reload
     // cannot leave an intentional edit waiting on an autosave timer.
     unawaited(saveNow());
@@ -151,48 +164,31 @@ class ProjectController extends ChangeNotifier {
 
   void quantity(WorkKind kind, String raw) {
     if (!editable) return;
-    // Linked masonry has no writable independent input.
-    if (savedProject.work(kind).linkedToTieBeam) return;
     final number = parseQuantity(kind, raw);
-    var next = _withDraft(savedProject, 'quantity:${kind.name}', raw, number);
-    if (number != null) {
-      final entry = next.work(kind);
-      final keepExcluded =
-          (kind.isMasonry || kind == WorkKind.tieBeam) &&
-          entry.explicitlyExcluded;
-      next = next.updateWork(
-        entry.copyWith(
-          quantity: number,
-          included: number > 0 && !keepExcluded ? true : null,
-        ),
-      );
-      if (kind == WorkKind.tieBeam && number > 0) {
-        for (final item in next.works.where(
-          (w) => w.linkedToTieBeam && !w.explicitlyExcluded && !w.included,
-        )) {
-          next = next.updateWork(item.copyWith(included: true));
-        }
-      }
-    }
-    _changed(next);
+    final entry = savedProject.work(kind);
+    final updated = entry.copyWith(
+      quantity: number ?? entry.quantity,
+      included: number != null && number > 0 ? true : null,
+      needsLengthReview: false,
+    );
+    _changed(
+      _withDraft(
+        savedProject.updateWork(updated),
+        'quantity:${kind.name}',
+        raw,
+        number,
+      ),
+    );
   }
 
-  void setLinkedToTieBeam(WorkKind kind, bool linked) {
-    if (!editable || !kind.isMasonry) return;
+  void acceptLength(WorkKind kind) {
+    if (!editable) return;
     final entry = savedProject.work(kind);
-    if (entry.linkedToTieBeam == linked) return;
-    final length = savedProject.effectiveQuantity(WorkKind.tieBeam);
-    final field = 'quantity:${kind.name}';
-    _drafts.remove(_key(field));
-    final drafts = {...savedProject.inputDrafts}..remove(field);
-    final updated = entry.copyWith(
-      linkedToTieBeam: linked,
-      quantity: linked ? entry.quantity : length,
-      included: length != null && length > 0 && !entry.explicitlyExcluded
-          ? true
-          : null,
+    if (!entry.needsLengthReview) return;
+    _changed(
+      savedProject.updateWork(entry.copyWith(needsLengthReview: false)),
+      affectsCalculation: false,
     );
-    _changed(savedProject.updateWork(updated).copyWith(inputDrafts: drafts));
   }
 
   void roofBeamLength(String raw) {

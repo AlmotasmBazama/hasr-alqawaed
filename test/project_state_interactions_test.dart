@@ -131,7 +131,7 @@ void main() {
       expect(controller.result.totalCost, closeTo(86364.2, 1e-8));
       await controller.selectProject('one');
       expect(controller.project.work(WorkKind.tieBeam).quantity, isNull);
-      expect(controller.result.totalCost, closeTo(41267.2, 1e-8));
+      expect(controller.result.totalCost, closeTo(67280.2, 1e-8));
       await controller.saveNow();
       final reopened = (await ProjectRepository(store: store).load()).data;
       expect(reopened.currentProject.work(WorkKind.tieBeam).quantity, 130);

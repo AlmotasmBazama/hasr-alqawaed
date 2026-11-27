@@ -231,7 +231,10 @@ void main() {
         expect(recovered.data.projects, hasLength(2));
         expect(recovered.data.customModels, hasLength(1));
         expect(store.values[ProjectRepository.previousBackupKey], raw);
-        expect(store.values[ProjectRepository.previousMigrationMarkerKey], '3');
+        expect(
+          store.values[ProjectRepository.previousMigrationMarkerKey],
+          '${ProjectState.schemaVersion}',
+        );
       },
     );
   }
@@ -480,7 +483,7 @@ void main() {
       final project = state.currentProject.updateWork(
         state.currentProject
             .work(WorkKind.foundations)
-            .copyWith(quantity: null),
+            .copyWith(quantity: null, included: true),
       );
       await repo.save(state.updateProject(project));
       final reopened = (await ProjectRepository(store: store).load()).data;

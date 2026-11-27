@@ -1,102 +1,153 @@
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const { pathToFileURL } = require('node:url');
 
-// Run through the same controls contractors use, in an empty browser profile.
+// Use a fresh browser profile so the full mobile journey starts with an empty job.
 module.exports = async function checkMasonry(browser, session, logFailures, errors) {
-  const s = await session(browser);
+  const s = await session(browser, {
+    viewport: { width: 360, height: 640 }, hasTouch: true, acceptDownloads: true,
+  });
   logFailures(s.page, errors);
-  const below = 'مباني تحت الكتينة';
-  const above = 'مباني فوق الكتينة';
-  const beam = s.textbox(/^طول الميدة/);
-  const summary = (item, length, linked) =>
-    s.includes(item + ': ' + length + ' م — ' + (linked ? 'نفس طول الميدة' : 'طول مخصص'));
+  const kinds = ['tieBeam', 'belowMasonry', 'aboveMasonry'];
+  const fields = [
+    s.textbox(/^طول الميدة/),
+    s.textbox(/^طول مباني تحت الكتينة/),
+    s.textbox(/^طول مباني فوق الكتينة/),
+  ];
   const press = async name => (await s.seek(s.button(name))).press('Enter');
-  async function calculate(total) {
-    await press('احسب المشروع');
+  const input = (index, text) => s.enter(fields[index], text);
+  const project = async () => {
+    const state = await s.getState();
+    return state.projects.find(p => p.id === state.currentProjectId);
+  };
+  async function lengths(expected, saved = false) {
+    const job = await project();
+    const works = saved ? job.calculatedProject.works : job.works;
+    assert.deepEqual(kinds.map(kind => works.find(w => w.kind === kind).quantity), expected);
+  }
+  async function calculate(total, action = 'احسب المشروع') {
+    await press(action);
     await s.includes(total);
   }
-  let mixedPdf;
+  let pdf;
   try {
     await s.open();
     await press('اختيار مشروع');
     await press('إنشاء مشروع جديد');
     const dialog = s.page.getByRole('alertdialog');
-    await s.enter(dialog.getByRole('textbox', { name: /اسم المشروع/ }), 'تجربة ربط أطوال المباني');
+    await s.enter(dialog.getByRole('textbox', { name: /اسم المشروع/ }), 'مشروع النخيل');
+    const location = dialog.getByRole('textbox', { name: /الموقع/ });
+    if (await location.count()) await s.enter(location, 'طرابلس');
     await dialog.getByRole('button', { name: 'حفظ', exact: true }).press('Enter');
-    await s.enter(beam, '١٣٠');
-    await summary(below, 130, true);
-    await summary(above, 130, true);
-    await calculate('45,097.00');
+    await dialog.waitFor({state:'detached'});
+    await lengths([null, null, null]);
+    await input(2, '١٢٥٫٧٥');
+    await lengths([null, null, 125.75]);
+    // Edit a digit in the middle without refocusing or replacing the entire input.
+    // Set the same logical selection as highlighting the second digit with
+    // touch. Physical arrow-key directions depend on the browser's bidi run.
+    await s.page.evaluate(() => {
+      let editor = document.activeElement;
+      while (editor?.shadowRoot?.activeElement) editor = editor.shadowRoot.activeElement;
+      if (editor?.value !== '١٢٥٫٧٥') throw Error('The numeric keyboard lost its active editor');
+      editor.setSelectionRange(1, 2);
+      document.dispatchEvent(new Event('selectionchange'));
+    });
+    await s.page.waitForTimeout(120);
+    await s.page.keyboard.insertText('٩');
+    await s.page.waitForTimeout(550);
+    await lengths([null, null, 195.75]);
+    assert.deepEqual((await project()).works.filter(w => w.included).map(w => w.kind), ['aboveMasonry']);
+    await input(0, '١٣٠');
+    await input(1, '٩٥');
+    await input(2, '١٦٠');
+    await calculate('47,908.50');
+    await lengths([130, 95, 160], true);
     await s.tab('الكميات');
-    await s.enter(beam, '150');
-    await summary(below, 150, true);
-    await summary(above, 150, true);
-    await press('تعديل الطول ' + above);
-    await s.enter(s.textbox(/^طول مخصص مباني فوق الكتينة/), '170');
-    await s.enter(beam, '160');
-    await summary(below, 160, true);
-    await summary(above, 170, false);
+    await input(0, '150');
     await s.open(true);
-    await summary(below, 160, true);
-    await summary(above, 170, false);
+    await lengths([150, 95, 160]);
     await s.tab('النتائج');
-    await s.includes('الحسبة تحتاج تحديثًا');
+    await s.includes('تحديث الحسبة');
     assert.equal(await s.button(/^(تنزيل|مشاركة) التقرير PDF$/).count(), 0);
-    await press('تحديث الحسبة');
-    await s.includes('57,014.00'); // 160 × 146.8 + 160 × 49.1 + 170 × 151
-    await press(/^كميات المواد المطلوبة/);
-    await s.includes('7,975 بلوكة');
-    await press(/^كميات المواد المطلوبة/);
-    mixedPdf = await s.download('masonry-160-170');
-    await s.tab('الكميات');
-    await s.enter(beam, '');
-    await summary(above, 170, false);
-    await calculate('25,670.00');
-    await s.tab('الكميات');
-    await s.enter(beam, '٠');
-    await summary(below, 0, true);
-    await summary(above, 170, false);
-    await s.enter(beam, '160');
-    await press('استخدام طول الميدة ' + above);
-    await summary(above, 160, true);
-    await press('غير مطلوب ' + below);
-    await s.enter(beam, '180');
-    await summary(above, 180, true);
+    await calculate('50,844.50', 'تحديث الحسبة');
+    await lengths([150, 95, 160], true);
+    await s.screenshot('mobile-independent-results');
+    await press(/^كميات المواد/);
+    await s.includes('6,950');
+    await press(/^كميات المواد/);
+    pdf = await s.download('independent');
+    const viewer = await s.context.newPage();
+    const [pdfFrame] = await Promise.all([
+      viewer.waitForEvent('framenavigated', {predicate: frame => frame.url().startsWith('chrome-extension:')}),
+      viewer.goto(pathToFileURL(pdf).href, {waitUntil:'domcontentloaded'}),
+    ]);
+    await pdfFrame.locator('pdf-viewer').waitFor({state:'attached'});
+    await viewer.close();
+
+    await s.page.setViewportSize({width:1360, height:1000});
     await s.open(true);
-    await calculate('53,604.00'); // 180 × (146.8 + 151)
+    await s.screenshot('independent-quantities');
+    await s.tab('النتائج');
+    await s.includes('50,844.50');
+    await s.screenshot('independent-results');
     await s.tab('الكميات');
-    await press('إضافة للحصر ' + below);
-    await summary(below, 180, true);
-    await calculate('62,442.00');
+    await input(2, '١٧٠');
+    await calculate('52,354.50');
+    await lengths([150, 95, 170], true);
+    await s.tab('الكميات');
+    await input(1, '');
+    await calculate('47,690.00');
+    await s.includes('حصر جزئي');
+    await s.includes('مباني تحت الكتينة');
+    await s.tab('الكميات');
+    await input(1, '٠');
+    await lengths([150, 0, 170]);
+    await press('غير مطلوب مباني فوق الكتينة');
+    await input(0, '151');
+    await s.open(true);
+    await lengths([151, 0, 170]);
+    assert.ok((await project()).works.find(w => w.kind === 'aboveMasonry').explicitlyExcluded);
+    await calculate('22,166.80');
+  } catch (error) {
+    console.error('Masonry verification screen:', await s.snapshot().catch(() => 'unavailable'));
+    await s.screenshot('masonry-failure').catch(() => {});
+    throw error;
   } finally {
     await s.context.close();
   }
 
-  // Optional raw snapshot captured directly from the released 3.1 app.
-  if (process.env.HASR_PREVIOUS_WEB_FIXTURE) {
+  // A raw storage export from the previous released app, captured after issuing
+  // an estimate with three 130 m lengths and changing only its beam to 150 m.
+  if (process.env.HASR_V33_WEB_FIXTURE) {
     const m = await session(browser);
-    logFailures(m.page, errors);
+    const raw = fs.readFileSync(process.env.HASR_V33_WEB_FIXTURE, 'utf8');
     try {
-      const raw = fs.readFileSync(process.env.HASR_PREVIOUS_WEB_FIXTURE, 'utf8');
       await m.context.addInitScript(value => {
-        if (!localStorage.getItem('hasr_project_state_v3')) {
-          localStorage.setItem('hasr_project_state_v3', value);
-        }
+        if (!localStorage.getItem('hasr_project_state_v3')) localStorage.setItem('hasr_project_state_v3', value);
       }, raw);
       await m.open();
-      await m.includes(below + ': 130 م — طول مخصص');
-      await m.includes(above + ': 130 م — طول مخصص');
-      await m.tab('النتائج');
-      await m.includes('86,364.20');
-      await m.tab('الكميات');
-      await m.enter(m.textbox(/^طول الميدة/), '160');
-      await m.includes(below + ': 130 م — طول مخصص');
-      await m.includes(above + ': 130 م — طول مخصص');
-      await m.button('احسب المشروع').press('Enter');
-      await m.includes('90,768.20');
-    } finally {
-      await m.context.close();
-    }
+      const getJob = async () => {
+        const state = await m.getState();
+        return state.projects.find(p => p.id === state.currentProjectId);
+      };
+      const works = (await getJob()).works;
+      assert.deepEqual(kinds.map(k => works.find(w => w.kind === k).quantity), [150,130,130]);
+      assert.equal(works.filter(w => w.needsLengthReview).length, 2);
+      assert.equal(await m.page.evaluate(()=>localStorage.getItem('hasr_project_state_v3')), raw);
+      const issued = (await getJob()).calculatedProject;
+      assert.deepEqual(kinds.map(k => issued.works.find(w => w.kind === k).quantity), [130,130,130]);
+      await m.enter(m.textbox(/^طول مباني تحت الكتينة/), '95');
+      await m.open(true);
+      const reviewed = (await getJob()).works;
+      assert.ok(!reviewed.find(w => w.kind === 'belowMasonry').needsLengthReview);
+      assert.ok(reviewed.find(w => w.kind === 'aboveMasonry').needsLengthReview);
+      await (await m.seek(m.button('اعتماد الطول'))).press('Enter');
+      await m.open(true);
+      const accepted = (await getJob()).works;
+      assert.ok(accepted.every(w => !w.needsLengthReview));
+      assert.deepEqual(kinds.map(k => accepted.find(w => w.kind === k).quantity), [150,95,130]);
+    } finally { await m.context.close(); }
   }
-  return mixedPdf;
+  return pdf;
 };

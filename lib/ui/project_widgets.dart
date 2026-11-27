@@ -18,6 +18,7 @@ String money(num value) {
 String statusLabel(WorkStatus status) => switch (status) {
   WorkStatus.calculated => 'محسوب',
   WorkStatus.needsData => 'يحتاج بيانات',
+  WorkStatus.unentered => 'لم يُدرج',
   WorkStatus.excluded => 'غير مطلوب — خارج الحساب',
   WorkStatus.noModel => 'يحتاج نموذجًا',
   WorkStatus.zeroQuantity => 'لا توجد كمية',
@@ -47,7 +48,7 @@ class NumberInput extends StatefulWidget {
   const NumberInput({
     super.key,
     required this.text,
-    required this.label,
+    this.label,
     required this.onChanged,
     this.semanticLabel,
     this.error,
@@ -56,9 +57,11 @@ class NumberInput extends StatefulWidget {
     this.suffixText,
     this.enabled = true,
     this.integer = false,
+    this.focusNode,
+    this.onNext,
   });
   final String text;
-  final String label;
+  final String? label;
   final ValueChanged<String> onChanged;
   final String? semanticLabel;
   final String? error;
@@ -67,6 +70,8 @@ class NumberInput extends StatefulWidget {
   final String? suffixText;
   final bool enabled;
   final bool integer;
+  final FocusNode? focusNode;
+  final VoidCallback? onNext;
   @override
   State<NumberInput> createState() => _NumberInputState();
 }
@@ -75,7 +80,7 @@ class _NumberInputState extends State<NumberInput> {
   late final TextEditingController _controller = TextEditingController(
     text: widget.text,
   );
-  final FocusNode _focus = FocusNode();
+  late final FocusNode _focus = widget.focusNode ?? FocusNode();
   bool _visited = false;
 
   @override
@@ -116,7 +121,7 @@ class _NumberInputState extends State<NumberInput> {
   void dispose() {
     _controller.dispose();
     _focus.removeListener(_onFocusChange);
-    _focus.dispose();
+    if (widget.focusNode == null) _focus.dispose();
     super.dispose();
   }
 
@@ -131,6 +136,10 @@ class _NumberInputState extends State<NumberInput> {
       textDirection: TextDirection.ltr,
       textAlign: TextAlign.center,
       keyboardType: TextInputType.numberWithOptions(decimal: !widget.integer),
+      textInputAction: widget.onNext == null
+          ? TextInputAction.done
+          : TextInputAction.next,
+      onEditingComplete: widget.onNext,
       onChanged: widget.onChanged,
       decoration: InputDecoration(
         labelText: widget.label,
@@ -138,7 +147,20 @@ class _NumberInputState extends State<NumberInput> {
         errorText: widget.displayErrors || _visited ? widget.error : null,
         helperText: widget.helperText,
         helperMaxLines: 4,
-        suffixText: widget.suffixText,
+        suffixIcon: widget.suffixText == null
+            ? null
+            : Padding(
+                padding: const EdgeInsetsDirectional.only(end: 10),
+                child: Text(
+                  widget.suffixText!,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12,
+                    color: secondaryText,
+                  ),
+                ),
+              ),
+        suffixIconConstraints: const BoxConstraints(minWidth: 0, minHeight: 0),
         errorMaxLines: 3,
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 10,

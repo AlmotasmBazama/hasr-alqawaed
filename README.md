@@ -2,9 +2,9 @@
 
 [![Flutter CI](https://github.com/AlmotasmBazama/hasr-alqawaed/actions/workflows/flutter.yml/badge.svg)](https://github.com/AlmotasmBazama/hasr-alqawaed/actions/workflows/flutter.yml)
 
-An Arabic RTL Flutter application for project quantity takeoffs and cost estimates. Version 3 adds a built-in roof model, project-specific profit, and explicit calculations to the seven-category quantity and cost estimator.
+An Arabic RTL Flutter application for project quantity takeoffs and cost estimates. Version 4 uses separate measurements for the tie beam and both masonry stages, with project-specific prices, profit and an itemized PDF quotation.
 
-**[Live demo](https://hasr-alqawaed-preview.web.app)** · **[العربية](README.ar.md)** · **[Sample report](docs/sample-report.pdf)**
+**[Live demo](https://hasr-alqawaed-preview.web.app)** · **[Android APK 4.0.0](https://github.com/AlmotasmBazama/hasr-alqawaed/releases/download/v4.0.0/hasr-project-4.0.0.apk)** · **[العربية](README.ar.md)** · **[Sample report](docs/sample-report.pdf)**
 
 The **[original foundation-only app (v1)](https://hasr-alqawaed-v1.web.app/)** remains available independently. The **[latest project estimator](https://hasr-alqawaed-preview.web.app/)** keeps its existing address. Each origin has separate local storage.
 
@@ -14,7 +14,7 @@ The **[original foundation-only app (v1)](https://hasr-alqawaed-v1.web.app/)** r
 
 - Three screens: quantities, prices and profit, and results.
 - Foundations, below-tie masonry, tie beams, lean slabs, columns, above-tie masonry, and a built-in 25 cm roof model with independent area and beam length.
-- New projects use the tie beam length for both masonry items. Each item can have its own length or be linked again. Older projects keep their independent lengths, and explicitly excluded items stay out of the estimate. The report identifies the length and its source for each masonry item.
+- The tie beam and each of the two masonry stages have separate manual length fields. The saved project, result and PDF use each stage's own input. At the standard coefficients, 95 m below the tie produces 950 blocks and 160 m above produces 6,000 blocks.
 - Dynamic material/service rows, editable coefficients and divisors, and labelled pricing units.
 - Independent project prices and model snapshots, with explicit per-row price overrides.
 - Material aggregation by identity, specification and unit. Costs sum actual line costs; labor quantities retain their work category and pricing unit.
@@ -89,7 +89,7 @@ The separate full example adds a 200 m² roof with 130 m of beams. Roof material
 
 SharedPreferencesAsync storage belongs to each device/browser origin. No account, database or synchronization is required. Keep the same web origin and Android ID `ly.hasr.hasr_alqawaed` to retain data.
 
-The v3 migration saves a backup of v2 data and preserves the source keys. It retains selected projects, model snapshots, exclusions, and prices, with profit defaulting to zero and no sample roof quantities added. Existing custom roof models retain their original input. Original v1 stores can still be migrated directly, with their source backed up. Writes are serialized; failed reads and migrations do not silently overwrite user projects.
+The v4 migration preserves v3 source data, explicit manual lengths (including zero), model and price choices, exclusions, and historical calculations. For previously linked masonry, the last known amount is presented for review. Edits and recalculations use independent inputs. Direct migrations from v2 and v1 remain available, with original data backed up. Writes are serialized.
 
 ## Build and validation
 
@@ -113,7 +113,7 @@ Physical-phone browser sharing and iOS builds are not verified. iOS needs macOS/
 
 ## Hosting
 
-The existing Firebase Hosting site is defined in `.firebaserc` and `firebase.json`. No Firebase SDK is required. For a separate deployment, configure your own project/site IDs.
+The existing Firebase Hosting site is defined in `.firebaserc` and `firebase.json`. Android APK downloads are hosted in GitHub Releases.
 
 The original app is preserved on the separate `hasr-alqawaed-v1` live site, cloned from archived Hosting version `25763ed3cfbaec6b`. The tracked deployment configuration targets only the latest app, `hasr-alqawaed-preview`; do not deploy the current project build over the original site.
 

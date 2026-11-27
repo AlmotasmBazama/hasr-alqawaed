@@ -4,6 +4,7 @@ import 'models.dart';
 enum WorkStatus {
   calculated('محسوب'),
   zeroQuantity('لا توجد كمية'),
+  unentered('لم يُدرج'),
   needsData('يحتاج بيانات'),
   excluded('غير مطلوب'),
   noModel('بانتظار النموذج');
@@ -163,7 +164,12 @@ WorkResult _calculateWork(Project project, WorkEntry entry) {
     return WorkResult(entry: entry, status: WorkStatus.zeroQuantity);
   }
   if (!entry.included) {
-    return WorkResult(entry: entry, status: WorkStatus.needsData);
+    return WorkResult(
+      entry: entry,
+      status: project.legacyIncompleteScope
+          ? WorkStatus.needsData
+          : WorkStatus.unentered,
+    );
   }
   final model = entry.model;
   if (model == null) {
@@ -245,10 +251,9 @@ ProjectResult calculateProject(Project project) {
   var materialCost = 0.0;
   var serviceCost = 0.0;
   for (final work in project.works) {
-    final quantity = project.effectiveQuantity(work.kind);
-    // A linked row derives its measure from the beam even when the beam's own
-    // costs are excluded. Explicit work exclusions always take precedence.
-    final entry = work.copyWith(quantity: quantity);
+    final entry = project.inputDrafts.containsKey('quantity:${work.kind.name}')
+        ? work.copyWith(quantity: null)
+        : work;
     var result = _calculateWork(project, entry);
     if (result.status == WorkStatus.calculated) {
       // Check aggregate overflow before accepting the entire work atomically.

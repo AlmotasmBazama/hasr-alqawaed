@@ -1,433 +1,255 @@
 import 'package:flutter/material.dart';
 
-import '../project/engine.dart';
 import '../project/models.dart';
 import 'app_theme.dart';
 import 'field_help.dart';
-import 'project_widgets.dart';
 
-class QuantityProjectCard extends StatelessWidget {
-  const QuantityProjectCard({
+class QuantityProjectHeading extends StatelessWidget {
+  const QuantityProjectHeading({
     super.key,
     required this.project,
-    required this.result,
-    required this.openProjects,
     required this.edit,
   });
 
   final Project project;
-  final ProjectResult result;
-  final VoidCallback? openProjects;
   final VoidCallback? edit;
 
   @override
   Widget build(BuildContext context) {
-    final scope = result.works.where((w) => w.status != WorkStatus.excluded);
-    final ready = scope
-        .where(
-          (w) =>
-              w.status == WorkStatus.calculated ||
-              w.status == WorkStatus.zeroQuantity,
-        )
-        .length;
-    final fraction = scope.isEmpty ? 0.0 : ready / scope.length;
-    return LayoutBuilder(
-      builder: (context, bounds) {
-        final wide = bounds.maxWidth >= 650;
-        final artWidth = wide ? 208.0 : 90.0;
-        final padding = wide ? 24.0 : 14.0;
-        final showArt = MediaQuery.textScalerOf(context).scale(1) < 1.5;
-        return DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              begin: Alignment.topRight,
-              end: Alignment.bottomLeft,
-              colors: [Color(0xFF163E33), Color(0xFF215744), Color(0xFF246451)],
-            ),
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Stack(
-            children: [
-              if (showArt)
-                Positioned(
-                  left: wide ? 22 : 7,
-                  top: 6,
-                  bottom: 6,
-                  width: artWidth,
-                  child: const IgnorePointer(
-                    child: ExcludeSemantics(child: FoundationStudy()),
+    final meta = [
+      if (project.location.isNotEmpty) (Icons.place_outlined, project.location),
+      if (project.date.isNotEmpty) (Icons.event_outlined, project.date),
+    ];
+    return Padding(
+      padding: const EdgeInsetsDirectional.fromSTEB(2, 0, 2, 14),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  project.name,
+                  style: const TextStyle(
+                    fontSize: 23,
+                    height: 1.5,
+                    fontWeight: FontWeight.w700,
+                    color: forestInk,
                   ),
                 ),
-              Padding(
-                padding: EdgeInsets.fromLTRB(
-                  showArt ? artWidth + padding : padding,
-                  padding,
-                  padding,
-                  padding,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (project.isExample)
-                      const Text(
-                        'مثال توضيحي مستقل',
-                        style: TextStyle(
-                          color: Color(0xFFDBD39A),
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: [
-                        Flexible(
-                          child: InkWell(
-                            onTap: openProjects,
-                            borderRadius: BorderRadius.circular(8),
-                            child: Text(
-                              project.name,
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: wide ? 27 : 21,
-                                fontWeight: FontWeight.w700,
-                                height: 1.45,
+                if (meta.isNotEmpty)
+                  Wrap(
+                    spacing: 16,
+                    runSpacing: 4,
+                    children: [
+                      for (final (icon, value) in meta)
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(icon, size: 15, color: secondaryText),
+                            const SizedBox(width: 4),
+                            Flexible(
+                              child: Text(
+                                value,
+                                style: const TextStyle(
+                                  color: secondaryText,
+                                  fontSize: 13,
+                                ),
                               ),
                             ),
-                          ),
+                          ],
                         ),
-                        IconButton(
-                          key: const ValueKey('edit_project'),
-                          tooltip: 'تعديل بيانات المشروع',
-                          onPressed: edit,
-                          color: const Color(0xFFC6DED1),
-                          iconSize: 17,
-                          icon: const Icon(Icons.edit_outlined),
-                        ),
-                      ],
-                    ),
-                    Wrap(
-                      spacing: 14,
-                      runSpacing: 3,
-                      children: [
-                        _Meta(
-                          Icons.place_outlined,
-                          project.location.isEmpty
-                              ? 'لم يُحدَّد الموقع'
-                              : project.location,
-                        ),
-                        _Meta(Icons.event_outlined, project.date),
-                      ],
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      scope.isEmpty
-                          ? 'كل البنود غير مطلوبة'
-                          : 'اكتمال البنود  $ready من ${scope.length}',
-                      style: const TextStyle(
-                        color: Color(0xFFE2EEE6),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 5),
-                    ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 255),
-                      child: ExcludeSemantics(
-                        child: LinearProgressIndicator(
-                          value: fraction,
-                          minHeight: 4,
-                          borderRadius: BorderRadius.circular(9),
-                          backgroundColor: const Color(0xFF47705F),
-                          color: const Color(0xFFC4DFA1),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+                    ],
+                  ),
+              ],
+            ),
           ),
-        );
-      },
+          IconButton.outlined(
+            key: const ValueKey('edit_project'),
+            tooltip: 'تعديل بيانات المشروع',
+            onPressed: edit,
+            style: IconButton.styleFrom(
+              side: const BorderSide(color: borderColor),
+              foregroundColor: primaryGreen,
+            ),
+            icon: const Icon(Icons.edit_outlined, size: 18),
+          ),
+        ],
+      ),
     );
   }
 }
 
-class _Meta extends StatelessWidget {
-  const _Meta(this.icon, this.text);
+class QuantityGroup extends StatelessWidget {
+  const QuantityGroup(this.title, this.icon, this.rows, {super.key});
+  final String title;
   final IconData icon;
-  final String text;
+  final List<Widget> rows;
 
   @override
-  Widget build(BuildContext context) => Row(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      Icon(icon, size: 14, color: const Color(0xFFB6D5C5)),
-      const SizedBox(width: 4),
-      Flexible(
-        child: Text(
-          text,
-          style: const TextStyle(fontSize: 12, color: Color(0xFFE2EEE6)),
+  Widget build(BuildContext context) => SurfaceCard(
+    padding: EdgeInsets.zero,
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Container(
+          decoration: const BoxDecoration(
+            color: Color(0xFFEAF1EC),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(15)),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          child: Row(
+            children: [
+              Icon(icon, color: primaryGreen, size: 20),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Semantics(
+                  header: true,
+                  child: Text(
+                    title,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 16,
+                      color: forestInk,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
-      ),
-    ],
+        for (var i = 0; i < rows.length; i++) ...[
+          if (i > 0) const Divider(indent: 14, endIndent: 14),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 3, 14, 10),
+            child: rows[i],
+          ),
+        ],
+      ],
+    ),
   );
 }
 
-IconData workIcon(WorkKind kind) => switch (kind) {
-  WorkKind.foundations => Icons.foundation_outlined,
-  WorkKind.belowMasonry || WorkKind.aboveMasonry => Icons.view_module_outlined,
-  WorkKind.tieBeam => Icons.straighten_outlined,
-  WorkKind.leanSlab => Icons.layers_outlined,
-  WorkKind.columns => Icons.view_column_outlined,
-  WorkKind.roof => Icons.roofing_outlined,
-};
-
-class QuantityWorkCard extends StatelessWidget {
-  const QuantityWorkCard({
+class QuantityFieldRow extends StatelessWidget {
+  const QuantityFieldRow({
     super.key,
-    required this.result,
     required this.title,
-    required this.status,
-    required this.quantity,
-    this.beams,
-    required this.details,
-    required this.toggleInclusion,
+    required this.help,
+    required this.input,
+    this.details,
+    this.toggleInclusion,
+    this.excluded = false,
+    this.kind,
+    this.status,
+    this.review,
   });
 
-  final WorkResult result;
   final String title;
-  final String status;
-  final Widget quantity;
-  final Widget? beams;
-  final VoidCallback details;
+  final String help;
+  final Widget input;
+  final WorkKind? kind;
+  final bool excluded;
+  final String? status;
+  final VoidCallback? details;
   final VoidCallback? toggleInclusion;
+  final Widget? review;
 
   @override
   Widget build(BuildContext context) {
-    final kind = result.kind;
-    final excluded = result.entry.explicitlyExcluded;
-    final ready = result.status == WorkStatus.calculated;
-    final statusColor = switch (result.status) {
-      WorkStatus.calculated => const Color(0xFF246450),
-      WorkStatus.needsData || WorkStatus.noModel => const Color(0xFF855A25),
-      _ => secondaryText,
-    };
-    Widget roofField(String name, String message, Widget field) => Column(
+    final action = kind == null
+        ? null
+        : TextButton(
+            key: ValueKey('include_${kind!.name}'),
+            onPressed: toggleInclusion,
+            style: TextButton.styleFrom(
+              foregroundColor: excluded ? primaryGreen : secondaryText,
+              textStyle: const TextStyle(
+                fontFamily: 'Cairo',
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              minimumSize: const Size(44, 44),
+            ),
+            child: Text(
+              excluded ? 'إضافة للحصر' : 'غير مطلوب',
+              semanticsLabel:
+                  '${excluded ? 'إضافة للحصر' : 'غير مطلوب'} ${kind!.label}',
+            ),
+          );
+    return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Row(
           children: [
             Expanded(
               child: Text(
-                name,
+                title,
                 style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
+                  fontSize: 15,
+                  height: 1.45,
+                  fontWeight: FontWeight.w700,
                 ),
               ),
             ),
-            FieldHelp(title: name, message: message),
+            FieldHelp(title: title, message: help),
+            if (kind != null)
+              IconButton(
+                key: ValueKey('work_${kind!.name}'),
+                onPressed: details,
+                tooltip: 'تفاصيل نموذج ${kind!.label}',
+                icon: const Icon(
+                  Icons.tune_rounded,
+                  size: 19,
+                  color: secondaryText,
+                ),
+              ),
           ],
         ),
-        const SizedBox(height: 8),
-        field,
-      ],
-    );
-    final titleBlock = Tooltip(
-      message: 'تفاصيل النموذج',
-      child: InkWell(
-        key: ValueKey('work_${kind.name}'),
-        onTap: details,
-        borderRadius: BorderRadius.circular(10),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4),
-          child: Row(
-            children: [
-              DecoratedBox(
-                decoration: BoxDecoration(
-                  color: excluded ? paper : const Color(0xFFEAF2EB),
-                  borderRadius: BorderRadius.circular(9),
-                ),
-                child: Padding(
-                  padding: const EdgeInsets.all(7),
-                  child: Icon(
-                    workIcon(kind),
-                    size: 19,
-                    color: excluded ? secondaryText : primaryGreen,
+        LayoutBuilder(
+          builder: (context, bounds) {
+            final stacked =
+                bounds.maxWidth < 230 ||
+                MediaQuery.textScalerOf(context).scale(1) > 1.35;
+            final entryActions = Wrap(
+              spacing: 4,
+              alignment: WrapAlignment.end,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                if (status != null)
+                  Text(
+                    status!,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: status == 'يحتاج بيانات'
+                          ? const Color(0xFF875719)
+                          : secondaryText,
+                    ),
                   ),
-                ),
-              ),
-              const SizedBox(width: 9),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 16,
-                        height: 1.5,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Row(
-                      children: [
-                        Flexible(
-                          child: Text(
-                            result.entry.model?.name ?? 'اختيار نموذج',
-                            style: const TextStyle(
-                              color: primaryGreen,
-                              fontSize: 12,
-                              height: 1.5,
-                            ),
-                          ),
-                        ),
-                        const Icon(
-                          Icons.chevron_left_rounded,
-                          size: 16,
-                          color: primaryGreen,
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-    return SurfaceCard(
-      padding: const EdgeInsets.fromLTRB(14, 14, 14, 4),
-      child: LayoutBuilder(
-        builder: (context, bounds) {
-          final scaled = MediaQuery.textScalerOf(context).scale(1);
-          final stacked = scaled > 1.3 || bounds.maxWidth < 360;
-          final displayQuantity = !excluded && kind != WorkKind.roof;
-          final separateRoofFields = scaled > 1.25 || bounds.maxWidth < 400;
-          final heading = displayQuantity
-              ? Row(
-                  children: [
-                    Expanded(child: titleBlock),
-                    FieldHelp(
-                      title: title,
-                      message: switch (kind) {
-                        WorkKind.foundations =>
-                          'أدخل عدد القواعد التي سيُطبَّق عليها النموذج المختار.',
-                        WorkKind.columns =>
-                          'أدخل عدد الأعمدة المطلوب حصرها وفق النموذج المختار.',
-                        _ =>
-                          'أدخل المساحة المطلوب حصرها بالمتر المربع. يحسب التطبيق كمية الخرسانة باستخدام معاملات النموذج المختار.',
-                      },
-                    ),
-                  ],
-                )
-              : titleBlock;
-          final roofUnit = result.entry.inputUnit;
-          final roofQuantityField = roofUnit == QuantityUnit.area
-              ? roofField(
-                  'مساحة السقف',
-                  'أدخل مساحة السقف المطلوب حصره بالمتر المربع. يستخدم النموذج هذه المساحة لحساب البنود المرتبطة بها.',
-                  quantity,
-                )
-              : roofField(
-                  roofUnit == QuantityUnit.linear ? 'طول السقف' : 'مقدار السقف',
-                  'أدخل مقدار السقف بوحدة «${roofUnit.label}» حسب النموذج المختار.',
-                  quantity,
-                );
-          final roofBeamField = beams == null
-              ? null
-              : roofField(
-                  'إجمالي أطوال كمرات السقف',
-                  'أدخل مجموع أطوال كمرات السقف بالمتر. هذه القيمة مستقلة عن طول الميدة، ويستخدمها النموذج لحساب البنود المرتبطة بالكمرات.',
-                  beams!,
-                );
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (!displayQuantity)
-                heading
-              else if (stacked) ...[
-                heading,
-                const SizedBox(height: 10),
-                quantity,
-              ] else
-                Row(
-                  children: [
-                    Expanded(child: heading),
-                    const SizedBox(width: 10),
-                    SizedBox(width: 136, child: quantity),
-                  ],
-                ),
-              if (!excluded && kind == WorkKind.roof) ...[
-                const SizedBox(height: 12),
-                if (roofBeamField == null)
-                  roofQuantityField
-                else if (separateRoofFields) ...[
-                  roofQuantityField,
-                  const SizedBox(height: 12),
-                  roofBeamField,
-                ] else
-                  Row(
-                    children: [
-                      Expanded(child: roofQuantityField),
-                      const SizedBox(width: 16),
-                      Expanded(child: roofBeamField),
-                    ],
-                  ),
+                ?action,
               ],
-              const SizedBox(height: 9),
-              const Divider(),
-              OverflowBar(
-                alignment: MainAxisAlignment.spaceBetween,
-                overflowAlignment: OverflowBarAlignment.start,
-                children: [
-                  Wrap(
-                    spacing: 5,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      Icon(
-                        ready
-                            ? Icons.check_circle_outline_rounded
-                            : excluded
-                            ? Icons.remove_circle_outline
-                            : result.status == WorkStatus.zeroQuantity
-                            ? Icons.check_rounded
-                            : Icons.circle_outlined,
-                        size: 14,
-                        color: statusColor,
-                      ),
-                      Text(
-                        status,
-                        style: TextStyle(
-                          color: statusColor,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                  TextButton(
-                    key: ValueKey('include_${kind.name}'),
-                    onPressed: toggleInclusion,
-                    style: TextButton.styleFrom(
-                      foregroundColor: excluded ? primaryGreen : secondaryText,
-                      textStyle: const TextStyle(
-                        fontFamily: 'Cairo',
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    child: Text(excluded ? 'إضافة للحصر' : 'غير مطلوب'),
-                  ),
-                ],
-              ),
-            ],
-          );
-        },
-      ),
+            );
+            if (stacked) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [input, entryActions],
+              );
+            }
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                SizedBox(
+                  width: bounds.maxWidth < 350 ? 124 : 152,
+                  child: input,
+                ),
+                const SizedBox(width: 8),
+                Expanded(child: entryActions),
+              ],
+            );
+          },
+        ),
+        ?review,
+      ],
     );
   }
 }

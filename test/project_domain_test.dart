@@ -202,9 +202,12 @@ void main() {
       final result = calculateProject(without);
       expect(result.work(WorkKind.tieBeam).cost, isNull);
       expect(result.work(WorkKind.tieBeam).status, WorkStatus.needsData);
-      expect(result.work(WorkKind.belowMasonry).status, WorkStatus.needsData);
-      expect(result.work(WorkKind.aboveMasonry).status, WorkStatus.needsData);
-      expect(result.totalCost, closeTo(86364.2 - 19084 - 6383 - 19630, 1e-8));
+      expect(result.work(WorkKind.belowMasonry).status, WorkStatus.calculated);
+      expect(result.work(WorkKind.aboveMasonry).status, WorkStatus.calculated);
+      expect(result.unfinishedWorks.map((work) => work.kind), [
+        WorkKind.tieBeam,
+      ]);
+      expect(result.totalCost, closeTo(86364.2 - 19084, 1e-8));
       expect(
         result.services.any((line) => line.kind == WorkKind.tieBeam),
         isFalse,

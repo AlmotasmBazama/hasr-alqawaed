@@ -15,14 +15,17 @@ class ProjectLoadResult {
 class ProjectRepository {
   ProjectRepository({KeyValueStore? store})
     : _store = store ?? PreferencesStore();
-  static const storageKey = 'hasr_project_state_v3';
+  static const storageKey = 'hasr_project_state_v4';
+  static const v3StorageKey = 'hasr_project_state_v3';
+  static const v3BackupKey = 'hasr_project_v3_original_backup';
+  static const v3MigrationMarkerKey = 'hasr_project_v3_migration_complete';
   static const previousStorageKey = 'hasr_project_state_v2';
   static const previousBackupKey = 'hasr_project_v2_original_backup';
   static const previousMigrationMarkerKey =
       'hasr_project_v2_migration_complete';
   static const legacyBackupKey = 'hasr_project_v1_original_backup';
   static const migrationMarkerKey = 'hasr_project_v1_migration_complete';
-  static const recoveryKey = 'hasr_project_v3_recovery_backup';
+  static const recoveryKey = 'hasr_project_v4_recovery_backup';
   final KeyValueStore _store;
   Future<ProjectLoadResult>? _loadFuture;
   Future<void> _pending = Future<void>.value();
@@ -48,14 +51,18 @@ class ProjectRepository {
 
   Future<ProjectLoadResult> _load() async {
     String? currentRaw;
+    String? v3Raw;
     String? previousRaw;
     String? legacyRaw;
     try {
       currentRaw = await _store.read(storageKey);
       if (currentRaw == null) {
-        previousRaw = await _store.read(previousStorageKey);
-        if (previousRaw == null) {
-          legacyRaw = await _store.read(AppRepository.storageKey);
+        v3Raw = await _store.read(v3StorageKey);
+        if (v3Raw == null) {
+          previousRaw = await _store.read(previousStorageKey);
+          if (previousRaw == null) {
+            legacyRaw = await _store.read(AppRepository.storageKey);
+          }
         }
       }
     } catch (_) {
@@ -83,15 +90,21 @@ class ProjectRepository {
         );
       }
     }
-    final sourceRaw = previousRaw ?? legacyRaw;
+    final sourceRaw = v3Raw ?? previousRaw ?? legacyRaw;
     if (sourceRaw != null) {
       ProjectState? migrated;
       try {
         // The byte-for-byte source survives both parse failures and save errors.
-        final fromV2 = previousRaw != null;
-        await _backup(fromV2 ? previousBackupKey : legacyBackupKey, sourceRaw);
+        final (backup, marker) = v3Raw != null
+            ? (v3BackupKey, v3MigrationMarkerKey)
+            : previousRaw != null
+            ? (previousBackupKey, previousMigrationMarkerKey)
+            : (legacyBackupKey, migrationMarkerKey);
+        await _backup(backup, sourceRaw);
         final source = jsonMap(jsonDecode(sourceRaw));
-        migrated = fromV2
+        migrated = v3Raw != null
+            ? migrateProjectStateV3(source)
+            : previousRaw != null
             ? migrateProjectStateV2(
                 ProjectState.fromJson(source, migrateV2: true),
               )
@@ -100,10 +113,7 @@ class ProjectRepository {
         ProjectState.fromJson(jsonMap(jsonDecode(json)));
         await _store.write(storageKey, json);
         // Written only AFTER the complete new snapshot has been saved.
-        await _store.write(
-          fromV2 ? previousMigrationMarkerKey : migrationMarkerKey,
-          '${ProjectState.schemaVersion}',
-        );
+        await _store.write(marker, '${ProjectState.schemaVersion}');
         _canWrite = true;
         return ProjectLoadResult(migrated);
       } catch (_) {

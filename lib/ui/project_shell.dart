@@ -33,6 +33,7 @@ class _ProjectShellState extends State<ProjectShell>
     widget.repository,
   );
   int _tab = 0;
+  final _inputFocus = <String, FocusNode>{};
   bool _services = false;
   bool _exporting = false;
   final Set<String> _calculationAttempts = {};
@@ -56,6 +57,9 @@ class _ProjectShellState extends State<ProjectShell>
     WidgetsBinding.instance.removeObserver(this);
     controller.saveNow();
     controller.dispose();
+    for (final node in _inputFocus.values) {
+      node.dispose();
+    }
     super.dispose();
   }
 
@@ -132,9 +136,26 @@ class _ProjectShellState extends State<ProjectShell>
     setState(() => _tab = index);
   }
 
+  String? _emptyEstimateMessage(ProjectResult preview) {
+    if (preview.works.any(
+      (work) =>
+          work.status == WorkStatus.calculated ||
+          work.status == WorkStatus.zeroQuantity,
+    )) {
+      return null;
+    }
+    return preview.unfinishedWorks.isEmpty
+        ? 'أدخل كمية لبند واحد على الأقل لحساب المشروع.'
+        : 'أكمل بيانات أحد البنود لحساب المشروع.';
+  }
+
   Future<void> _calculate() async {
     setState(() => _calculationAttempts.add(controller.savedProject.id));
     FocusScope.of(context).unfocus();
+    if (_emptyEstimateMessage(controller.result) != null) {
+      if (_tab == 2) _changeTab(0);
+      return;
+    }
     await _action(() async {
       await controller.calculate();
       if (mounted) _changeTab(2);
@@ -189,6 +210,9 @@ class _ProjectShellState extends State<ProjectShell>
       }
       final titles = ['كميات المشروع', 'الأسعار والربح', 'نتائج المشروع'];
       final keyboardOpen = MediaQuery.viewInsetsOf(context).bottom > 0;
+      final guidance = _showInputErrors && _tab != 2
+          ? _emptyEstimateMessage(controller.result)
+          : null;
       final wide =
           MediaQuery.sizeOf(context).width >= 900 &&
           MediaQuery.textScalerOf(context).scale(1) < 1.35;
@@ -233,6 +257,11 @@ class _ProjectShellState extends State<ProjectShell>
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: Notice(controller.warning!),
                 ),
+              if (guidance != null && !keyboardOpen)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Notice(guidance),
+                ),
               Expanded(
                 child: TweenAnimationBuilder<double>(
                   key: ValueKey((_tab, controller.savedProject.id)),
@@ -266,6 +295,16 @@ class _ProjectShellState extends State<ProjectShell>
     },
   );
 
+  FocusNode _focusFor(String field) =>
+      _inputFocus.putIfAbsent(field, () => FocusNode(debugLabel: field));
+
+  VoidCallback? _nextField(String field, List<String> fields) {
+    final next = fields.indexOf(field) + 1;
+    return next >= fields.length
+        ? null
+        : () => _focusFor(fields[next]).requestFocus();
+  }
+
   Widget _project() {
     final project = controller.project;
     final result = controller.result;
@@ -276,181 +315,228 @@ class _ProjectShellState extends State<ProjectShell>
       icon: const Icon(Icons.calculate_outlined),
       label: const Text('احسب المشروع'),
     );
+    final orderedFields = [
+      for (final kind in [
+        WorkKind.foundations,
+        WorkKind.columns,
+        WorkKind.tieBeam,
+        WorkKind.belowMasonry,
+        WorkKind.aboveMasonry,
+        WorkKind.leanSlab,
+        WorkKind.roof,
+      ])
+        'quantity:${kind.name}',
+      if (project.work(WorkKind.roof).requiresRoofBeamLength) 'roofBeamLength',
+    ];
+    Widget row(WorkKind kind) => _workRow(result.work(kind), orderedFields);
+    Widget group(int order, String title, IconData icon, List<Widget> rows) =>
+        FocusTraversalOrder(
+          order: NumericFocusOrder(order.toDouble()),
+          child: FocusTraversalGroup(
+            policy: WidgetOrderTraversalPolicy(),
+            child: QuantityGroup(title, icon, rows),
+          ),
+        );
+    final foundations = group(
+      1,
+      'القواعد والأعمدة',
+      Icons.foundation_outlined,
+      [row(WorkKind.foundations), row(WorkKind.columns)],
+    );
+    final lengths = group(2, 'الميدة والمباني', Icons.straighten_rounded, [
+      row(WorkKind.tieBeam),
+      row(WorkKind.belowMasonry),
+      row(WorkKind.aboveMasonry),
+    ]);
+    final slab = group(3, 'الكرسنة', Icons.layers_outlined, [
+      row(WorkKind.leanSlab),
+    ]);
+    final roof = group(4, 'السقف', Icons.roofing_outlined, [
+      row(WorkKind.roof),
+      if (project.work(WorkKind.roof).requiresRoofBeamLength)
+        _roofBeamRow(project.work(WorkKind.roof)),
+    ]);
+    const gap = SizedBox(height: 14);
     final fields = ProjectBody(
       key: ValueKey('project:${project.id}'),
       children: [
-        QuantityProjectCard(
+        QuantityProjectHeading(
           project: project,
-          result: result,
-          openProjects: controller.editable ? _projects : null,
           edit: controller.editable ? _metadata : null,
         ),
-        const SectionHeading(
-          'بنود الأعمال',
-          icon: Icons.format_list_bulleted_rounded,
-        ),
-        LayoutBuilder(
-          builder: (context, bounds) {
-            final paired =
-                bounds.maxWidth >= 720 &&
-                MediaQuery.textScalerOf(context).scale(1) <= 1.3;
-            final lengths = MasonryLengths(
-              controller: controller,
-              result: result,
-              details: _details,
-              displayErrors: _showInputErrors,
-            );
-            final foundations = _workRow(result.work(WorkKind.foundations));
-            final leanSlab = _workRow(result.work(WorkKind.leanSlab));
-            final columns = _workRow(result.work(WorkKind.columns));
-            return Column(
-              children: [
-                if (paired)
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(child: lengths),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          children: [
-                            foundations,
-                            const SizedBox(height: 10),
-                            leanSlab,
-                            const SizedBox(height: 10),
-                            columns,
-                          ],
-                        ),
-                      ),
-                    ],
-                  )
-                else ...[
-                  foundations,
-                  const SizedBox(height: 10),
-                  lengths,
-                  const SizedBox(height: 10),
-                  leanSlab,
-                  const SizedBox(height: 10),
-                  columns,
+        FocusTraversalGroup(
+          policy: OrderedTraversalPolicy(),
+          child: LayoutBuilder(
+            builder: (context, bounds) {
+              if (bounds.maxWidth < 800 ||
+                  MediaQuery.textScalerOf(context).scale(1) > 1.35) {
+                return Column(
+                  children: [foundations, gap, lengths, gap, slab, gap, roof],
+                );
+              }
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: Column(children: [foundations, gap, slab])),
+                  const SizedBox(width: 16),
+                  Expanded(child: Column(children: [lengths, gap, roof])),
                 ],
-                const SizedBox(height: 12),
-                _workRow(result.work(WorkKind.roof)),
-              ],
-            );
-          },
+              );
+            },
+          ),
         ),
-        if (keyboardOpen) ...[const SizedBox(height: 12), calculateButton],
+        if (keyboardOpen) ...[gap, calculateButton],
       ],
     );
     return Column(
       children: [
         Expanded(child: fields),
-        if (!keyboardOpen)
-          Container(
-            width: double.infinity,
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              border: Border(top: BorderSide(color: borderColor)),
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 1100),
-                child: LayoutBuilder(
-                  builder: (context, bounds) {
-                    return Align(
-                      alignment: AlignmentDirectional.centerEnd,
-                      child: SizedBox(
-                        width: bounds.maxWidth > 680 ? 250 : bounds.maxWidth,
-                        child: calculateButton,
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ),
-          ),
+        if (!keyboardOpen) _actionBar(calculateButton),
       ],
     );
   }
 
-  Widget _workRow(WorkResult result) {
+  Widget _actionBar(Widget button) => Container(
+    width: double.infinity,
+    decoration: const BoxDecoration(
+      color: Colors.white,
+      border: Border(top: BorderSide(color: borderColor)),
+    ),
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+    child: Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 1100),
+        child: LayoutBuilder(
+          builder: (context, bounds) => Align(
+            alignment: AlignmentDirectional.centerEnd,
+            child: SizedBox(
+              width: bounds.maxWidth > 680 ? 250 : bounds.maxWidth,
+              child: button,
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
+  Widget _workRow(WorkResult result, List<String> orderedFields) {
     final entry = result.entry;
     final kind = entry.kind;
-    final model = entry.model;
-    final unit = model?.inputUnit ?? kind.defaultUnit;
-    final saved = controller.savedProject;
-    final raw = controller.draft(
-      'quantity:${kind.name}',
-      saved.work(kind).quantity,
-    );
-    final beamRaw = controller.draft(
-      'roofBeamLength',
-      saved.work(kind).roofBeamLength,
-    );
-    final roofArea = kind == WorkKind.roof && unit == QuantityUnit.area;
-    final showBeams = kind == WorkKind.roof && entry.requiresRoofBeamLength;
+    final title = entry.quantityLabel;
+    final field = 'quantity:${kind.name}';
+    final saved = controller.savedProject.work(kind);
+    final raw = controller.draft(field, saved.quantity);
+    final showStatus =
+        result.status != WorkStatus.unentered &&
+        (entry.explicitlyExcluded ||
+            saved.included ||
+            entry.quantity == 0 ||
+            _showInputErrors);
     final status =
         result.status == WorkStatus.calculated &&
             (controller.calculatedResult == null ||
                 controller.needsRecalculation)
         ? 'جاهز للحساب'
         : statusLabel(result.status);
-    final title = switch (kind) {
-      WorkKind.foundations => 'عدد القواعد',
-      WorkKind.belowMasonry => 'طول مباني تحت الكتينة',
-      WorkKind.tieBeam => 'طول الميدة',
-      WorkKind.leanSlab => 'مساحة الكرسنة',
-      WorkKind.columns => 'عدد الأعمدة',
-      WorkKind.aboveMasonry => 'طول مباني فوق الكتينة',
-      WorkKind.roof => 'السقف',
-    };
-    final quantity = NumberInput(
-      semanticLabel: roofArea ? 'مساحة السقف' : 'كمية ${kind.label}',
-      key: ValueKey('${saved.id}:quantity:${kind.name}'),
-      text: raw,
-      label: unit.label,
-      integer: kind.integerQuantity,
-      enabled: controller.editable,
-      displayErrors: _showInputErrors,
-      error: !entry.explicitlyExcluded && entry.quantity == null
-          ? (kind.integerQuantity
-                ? 'أدخل عددًا صحيحًا غير سالب.'
-                : 'أدخل قيمة رقمية غير سالبة.')
-          : null,
-      onChanged: (value) => controller.quantity(kind, value),
-    );
-    final beams = NumberInput(
-      semanticLabel: 'إجمالي أطوال كمرات السقف',
-      key: ValueKey('${saved.id}:roof_beam_length'),
-      text: beamRaw,
-      label: QuantityUnit.linear.label,
-      enabled: controller.editable,
-      displayErrors: _showInputErrors,
-      helperText: 'مستقل عن طول الميدة',
-      error: !entry.explicitlyExcluded && entry.roofBeamLength == null
-          ? (beamRaw.trim().isEmpty
-                ? 'أدخل أطوال الكمرات لإكمال حساب السقف.'
-                : 'أدخل قيمة رقمية غير سالبة.')
-          : null,
-      onChanged: controller.roofBeamLength,
-    );
-    return QuantityWorkCard(
-      result: result,
+    return QuantityFieldRow(
       title: title,
-      status: status,
-      quantity: quantity,
-      beams: showBeams ? beams : null,
+      help: switch (kind) {
+        WorkKind.belowMasonry =>
+          'أدخل مجموع أطوال المباني تحت الكتينة بالمتر حسب المخطط.',
+        WorkKind.aboveMasonry =>
+          'أدخل مجموع أطوال المباني فوق الكتينة بالمتر حسب المخطط.',
+        WorkKind.tieBeam => 'أدخل مجموع أطوال الميدات بالمتر حسب مخطط المشروع.',
+        WorkKind.foundations =>
+          'أدخل عدد القواعد التي سيُطبَّق عليها النموذج المختار.',
+        WorkKind.columns =>
+          'أدخل عدد الأعمدة المطلوب حصرها وفق النموذج المختار.',
+        WorkKind.leanSlab => 'أدخل مساحة الكرسنة بالمتر المربع حسب المخطط.',
+        WorkKind.roof =>
+          entry.inputUnit == QuantityUnit.area
+              ? 'أدخل مساحة السقف المطلوب حصره بالمتر المربع. يستخدم النموذج هذه المساحة لحساب البنود المرتبطة بها.'
+              : 'أدخل مقدار السقف بوحدة «${entry.inputUnit.label}» حسب النموذج المختار.',
+      },
+      kind: kind,
+      excluded: entry.explicitlyExcluded,
       details: () => _details(kind),
       toggleInclusion: controller.editable
           ? () => controller.include(kind, entry.explicitlyExcluded)
           : null,
+      status: showStatus ? status : null,
+      review: entry.needsLengthReview && saved.quantity != null
+          ? LengthReview(
+              entry: saved,
+              onAccept: controller.editable && entry.quantity != null
+                  ? () => controller.acceptLength(kind)
+                  : null,
+            )
+          : null,
+      input: NumberInput(
+        semanticLabel: title,
+        key: ValueKey('${controller.savedProject.id}:$field'),
+        text: raw,
+        suffixText: entry.inputUnit.shortLabel,
+        integer: kind.integerQuantity,
+        focusNode: _focusFor(field),
+        onNext: _nextField(field, orderedFields),
+        enabled: controller.editable,
+        displayErrors:
+            _showInputErrors && result.status != WorkStatus.unentered,
+        error: !entry.explicitlyExcluded && entry.quantity == null
+            ? (kind.integerQuantity
+                  ? 'أدخل عددًا صحيحًا غير سالب.'
+                  : 'أدخل قيمة رقمية غير سالبة.')
+            : null,
+        onChanged: (value) => controller.quantity(kind, value),
+      ),
+    );
+  }
+
+  Widget _roofBeamRow(WorkEntry entry) {
+    const field = 'roofBeamLength';
+    const title = 'إجمالي أطوال كمرات السقف';
+    final saved = controller.savedProject;
+    final raw = controller.draft(
+      field,
+      saved.work(WorkKind.roof).roofBeamLength,
+    );
+    return QuantityFieldRow(
+      title: title,
+      help:
+          'أدخل مجموع أطوال كمرات السقف بالمتر. هذه القيمة مستقلة عن طول الميدة، ويستخدمها النموذج لحساب البنود المرتبطة بالكمرات.',
+      input: NumberInput(
+        semanticLabel: title,
+        key: ValueKey('${saved.id}:roof_beam_length'),
+        focusNode: _focusFor(field),
+        text: raw,
+        suffixText: QuantityUnit.linear.shortLabel,
+        enabled: controller.editable,
+        displayErrors:
+            _showInputErrors &&
+            (entry.included ||
+                controller.savedProject.inputDrafts.containsKey(field)),
+        error: !entry.explicitlyExcluded && entry.roofBeamLength == null
+            ? (raw.trim().isEmpty
+                  ? 'أدخل أطوال الكمرات لإكمال حساب السقف.'
+                  : 'أدخل قيمة رقمية غير سالبة.')
+            : null,
+        onChanged: controller.roofBeamLength,
+      ),
     );
   }
 
   Widget _prices() {
     final project = controller.project;
-    return ProjectBody(
+    final priceFields = [
+      'profitPercentage',
+      if (!_services)
+        for (final material in materialCatalog) 'material:${material.id}'
+      else
+        for (final work in project.works)
+          for (final row in work.model?.rows ?? const <ModelRow>[])
+            if (!row.isMaterial) 'service:${servicePriceKey(work.kind, row)}',
+    ];
+    final fields = ProjectBody(
       key: ValueKey('prices:${project.id}:$_services'),
       children: [
         FinanceProjectHeading(
@@ -470,7 +556,9 @@ class _ProjectShellState extends State<ProjectShell>
                 'profitPercentage',
                 controller.savedProject.profitPercentage,
               ),
-              label: 'النسبة (%)',
+              suffixText: '%',
+              focusNode: _focusFor('profitPercentage'),
+              onNext: _nextField('profitPercentage', priceFields),
               enabled: controller.editable,
               displayErrors: _showInputErrors,
               error: project.profitPercentage == null
@@ -504,15 +592,30 @@ class _ProjectShellState extends State<ProjectShell>
                 ],
               ),
               const SizedBox(height: 10),
-              ..._priceCards(project),
+              ..._priceCards(project, priceFields),
             ],
           ),
         ),
       ],
     );
+    return Column(
+      children: [
+        Expanded(child: fields),
+        if (MediaQuery.viewInsetsOf(context).bottom == 0)
+          _actionBar(
+            FilledButton.icon(
+              onPressed: controller.editable ? _calculate : null,
+              icon: const Icon(Icons.calculate_outlined),
+              label: Text(
+                controller.needsRecalculation ? 'تحديث الحسبة' : 'احسب المشروع',
+              ),
+            ),
+          ),
+      ],
+    );
   }
 
-  List<Widget> _priceCards(Project project) => [
+  List<Widget> _priceCards(Project project, List<String> fields) => [
     if (!_services)
       SurfaceCard(
         child: Column(
@@ -525,6 +628,8 @@ class _ProjectShellState extends State<ProjectShell>
                 materialId: material.id,
                 input: NumberInput(
                   semanticLabel: 'سعر ${material.label}',
+                  focusNode: _focusFor('material:${material.id}'),
+                  onNext: _nextField('material:${material.id}', fields),
                   key: ValueKey('${project.id}:price:${material.id}'),
                   text: controller.draft(
                     'material:${material.id}',
@@ -564,6 +669,13 @@ class _ProjectShellState extends State<ProjectShell>
                   helpTitle: 'سعر ${row.label} ${work.kind.label}',
                   input: NumberInput(
                     semanticLabel: 'سعر ${row.label} ${work.kind.label}',
+                    focusNode: _focusFor(
+                      'service:${servicePriceKey(work.kind, row)}',
+                    ),
+                    onNext: _nextField(
+                      'service:${servicePriceKey(work.kind, row)}',
+                      fields,
+                    ),
                     key: ValueKey(
                       '${project.id}:service:${servicePriceKey(work.kind, row)}',
                     ),
@@ -712,8 +824,7 @@ class _ProjectShellState extends State<ProjectShell>
     final profit = result.profitPercentage;
     final profitAmount = result.profitAmount;
     final quotation = result.quotationTotal;
-    final shareAvailable = !kIsWeb || supportsBrowserFileSharing;
-    return ProjectBody(
+    final body = ProjectBody(
       key: ValueKey('results:${project.id}'),
       children: [
         FinanceProjectHeading(result.project.name),
@@ -863,9 +974,9 @@ class _ProjectShellState extends State<ProjectShell>
           for (final work in result.works)
             if (work.lines.isNotEmpty) ...[
               SectionHeading('${work.kind.label} • ${work.entry.model!.name}'),
-              if (work.kind.isMasonry)
+              if (work.entry.quantity != null)
                 Text(
-                  masonryLengthSummary(work.entry),
+                  '${work.entry.quantityLabel} · ${measure(work.entry.quantity!)} ${work.entry.inputUnit.shortLabel}',
                   style: const TextStyle(
                     color: primaryGreen,
                     fontWeight: FontWeight.w600,
@@ -881,26 +992,31 @@ class _ProjectShellState extends State<ProjectShell>
           ],
         ]),
         const SizedBox(height: 20),
-        FilledButton.icon(
-          key: const ValueKey('export_project_pdf'),
-          onPressed: _exporting || quotation == null ? null : _export,
-          icon: _exporting
-              ? const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : Icon(
-                  shareAvailable
-                      ? Icons.share_outlined
-                      : Icons.download_outlined,
-                ),
-          label: Text(
-            _exporting
-                ? 'جارٍ تجهيز التقرير…'
-                : shareAvailable
-                ? 'مشاركة التقرير PDF'
-                : 'تنزيل التقرير PDF',
+      ],
+    );
+    return Column(
+      children: [
+        Expanded(child: body),
+        _actionBar(
+          FilledButton.icon(
+            key: const ValueKey('export_project_pdf'),
+            onPressed: _exporting || quotation == null ? null : _export,
+            icon: _exporting
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Icon(
+                    !kIsWeb ? Icons.share_outlined : Icons.download_outlined,
+                  ),
+            label: Text(
+              _exporting
+                  ? 'جارٍ تجهيز التقرير…'
+                  : !kIsWeb
+                  ? 'مشاركة التقرير PDF'
+                  : 'تنزيل التقرير PDF',
+            ),
           ),
         ),
       ],

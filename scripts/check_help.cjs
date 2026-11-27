@@ -7,7 +7,7 @@ module.exports = async function checkHelp(browser, session, logFailures, errors)
     acceptDownloads: true,
   });
   logFailures(s.page, errors);
-  const storageKey = 'hasr_project_state_v3';
+  const storageKey = 'hasr_project_state_v4';
   const state = () => s.page.evaluate(key => ({
     saved: localStorage.getItem(key),
     writes: window.projectWriteCount,
@@ -49,18 +49,23 @@ module.exports = async function checkHelp(browser, session, logFailures, errors)
     await s.includes('147,931.70');
     await s.tab('الكميات');
     await help('طول الميدة', ['طول الميدة', 'حسب مخطط المشروع']);
-    await help('مباني فوق الكتينة', ['يستخدم هذا البند طول الميدة', 'تلقائيًا']);
+    await help('طول مباني تحت الكتينة', ['أدخل مجموع أطوال المباني تحت الكتينة بالمتر حسب المخطط.']);
+    await help('طول مباني فوق الكتينة', ['أدخل مجموع أطوال المباني فوق الكتينة بالمتر حسب المخطط.']);
     const project = await s.getState();
     assert.equal(project.projects.find(p => p.id === project.currentProjectId).calculationStale, false);
 
     await help('إجمالي أطوال كمرات السقف', ['مستقلة عن طول الميدة']);
-    await s.includes('مستقل عن طول الميدة');
     await s.scroll(-3200);
-    await (await s.seek(s.button('تعديل الطول مباني فوق الكتينة'))).press('Enter');
-    const input = s.textbox(/^طول مخصص مباني فوق الكتينة/);
+    const input = s.textbox(/^طول مباني فوق الكتينة/);
     await s.enter(input, '١٧٠٫٥');
-    await help('مباني فوق الكتينة', ['هذا طول مخصص لا يتغير عند تعديل الميدة', 'لإعادة الربط']);
-    await s.includes('170.5 م — طول مخصص');
+    await help('طول مباني فوق الكتينة', ['أدخل مجموع أطوال المباني فوق الكتينة بالمتر حسب المخطط.']);
+    // Returning from help preserves the user's original Arabic edit buffer.
+    await input.focus();
+    await s.page.waitForFunction(() => {
+      let editor = document.activeElement;
+      while (editor?.shadowRoot?.activeElement) editor = editor.shadowRoot.activeElement;
+      return editor?.value === '١٧٠٫٥';
+    });
     await s.tab('النتائج');
     await s.includes('تغيّرت المدخلات. حدّث الحسبة لإظهار النتائج الجديدة.');
     assert.equal(await s.button(/^(مشاركة|تنزيل) التقرير PDF$/).count(), 0);
@@ -74,7 +79,7 @@ module.exports = async function checkHelp(browser, session, logFailures, errors)
     await s.tab('الأسعار والربح');
     await help('نسبة الربح على التكلفة', [
       'تُضاف هذه النسبة مرة واحدة',
-      'تكلفة 1,000 د.ل وربح 10% تعطي ربحًا 100 د.ل، وإجمالي عرض 1,100 د.ل.',
+      'تكلفة 1,000 د.ل وربح 10% تعطي إجمالي عرض 1,100 د.ل.',
     ], { touch: true });
     await s.tab('النتائج');
     await s.button('تحديث الحسبة').press('Enter');
@@ -82,7 +87,8 @@ module.exports = async function checkHelp(browser, session, logFailures, errors)
     await s.download('help-quotation');
     await s.tab('الكميات');
     await (await s.seek(s.button('غير مطلوب مباني تحت الكتينة'))).press('Enter');
-    await s.includes('غير مطلوب — خارج الحساب');
+    assert.ok((await s.getState()).projects.find(p => p.id === project.currentProjectId)
+      .works.find(w => w.kind === 'belowMasonry').explicitlyExcluded);
   } catch (error) {
     console.error('Help verification screen:', await s.snapshot().catch(() => 'unavailable'));
     await s.screenshot('help-failure').catch(() => {});

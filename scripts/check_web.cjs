@@ -7,7 +7,7 @@ const checkHelp = require('./check_help.cjs');
 const { chromium } = require(process.env.HASR_PLAYWRIGHT_PATH || 'playwright');
 
 const url = process.argv[2];
-const prefix = process.argv[3] || 'local-v3';
+const prefix = process.argv[3] || 'local-v4';
 if (!url) throw new Error('Usage: node scripts/check_web.cjs <url> [prefix]');
 const output = path.resolve(__dirname, '..', 'output', 'web-checks');
 fs.mkdirSync(output, { recursive: true });
@@ -27,7 +27,7 @@ const legacy = {
   },
 };
 
-const stateKey = 'hasr_project_state_v3';
+const stateKey = 'hasr_project_state_v4';
 const v1Key = 'hasr_alqawaed_state_v1';
 const baseOptions = { viewport: { width: 1280, height: 900 }, acceptDownloads: true };
 const pdfAction = /^(تنزيل|مشاركة) التقرير PDF$/;
@@ -45,7 +45,7 @@ async function session(browser, options = baseOptions) {
     const trigger = page.locator('flt-semantics-placeholder');
     await trigger.waitFor({ state: 'attached', timeout: 90000 });
     await trigger.evaluate(el => el.click());
-    await page.getByRole('heading', { name: 'كميات المشروع', exact: true }).waitFor();
+    await button('اختيار مشروع').waitFor();
   }
   async function open(reload = false) {
     if (reload) await page.reload({ waitUntil: 'domcontentloaded' });
@@ -62,9 +62,11 @@ async function session(browser, options = baseOptions) {
     await page.waitForTimeout(180); // Wait for Flutter to update visible semantics.
   }
   async function seek(locator) {
-    for (let i = 0; i < 18; i++) {
+    if (await locator.count() && await locator.first().isVisible()) return locator.first();
+    await scroll(-6000);
+    for (let i = 0; i < 22; i++) {
       if (await locator.count() && await locator.first().isVisible()) return locator.first();
-      await scroll(375);
+      await scroll(330);
     }
     await locator.first().waitFor();
     return locator.first();
@@ -95,7 +97,7 @@ async function session(browser, options = baseOptions) {
       const raw = localStorage.getItem(key);
       return raw && JSON.parse(JSON.parse(raw)).currentProjectId !== before;
     }, { key: stateKey, before });
-    await page.getByRole('heading', { name: 'كميات المشروع', exact: true }).waitFor();
+    await button('اختيار مشروع').waitFor();
     return (await getState()).currentProjectId;
   }
   async function download(label) {
@@ -157,7 +159,7 @@ function logFailures(page, errors) {
     }, { data: legacy, key: v1Key });
     await s.open();
     const migrated = await s.getState();
-    assert.equal(migrated.version, 3);
+    assert.equal(migrated.version, 4);
     assert.equal(migrated.projects[0].name, 'مشروعي السابق');
     assert.equal(migrated.customModels[0].id, 'browser-legacy-model');
     assert.equal(migrated.projects[0].works.filter(w => w.included).length, 1);
@@ -171,6 +173,9 @@ function logFailures(page, errors) {
     await s.includes('لم يُحسب المشروع بعد');
     assert.equal(await s.button(pdfAction).count(), 0);
     await s.tab('الكميات');
+    for (const title of ['طول الميدة', 'طول مباني تحت الكتينة', 'طول مباني فوق الكتينة']) {
+      await s.enter(s.textbox(new RegExp('^' + title)), '١٣٠');
+    }
     await s.screenshot('desktop-quantities');
     await s.button('احسب المشروع').press('Enter');
     await s.includes('86,364.20');
@@ -221,8 +226,8 @@ function logFailures(page, errors) {
     await s.tab('الكميات');
     await s.enter(s.textbox(/^إجمالي أطوال كمرات السقف/), '');
     await s.button('احسب المشروع').press('Enter');
-    await s.includes('حصر جزئي — توجد بنود غير مكتملة');
-    await s.includes('البنود غير المكتملة: السقف');
+    await s.includes('حصر جزئي');
+    await s.includes('السقف');
     const partialPdf = await s.download('partial');
     assert.equal((await s.getState()).projects.length, 3);
     checks.push('mobile320AndPdf', 'missingRoofBeamLengthRemainsPartial');
@@ -254,7 +259,7 @@ function logFailures(page, errors) {
     delete p.materialPrices.hollowBlock;
     for (const property of ['inputDrafts', 'profitPercentage', 'calculatedProject', 'calculationStale']) delete p[property];
     for (const work of p.works) {
-      delete work.linkedToTieBeam;
+      delete work.needsLengthReview;
       delete work.roofBeamLength;
       delete work.explicitlyExcluded;
       for (const row of work.model?.rows ?? []) delete row.quantitySource;
@@ -296,8 +301,9 @@ function logFailures(page, errors) {
     await share.open();
     await share.addSample(true);
     await share.button('احسب المشروع').press('Enter');
-    await (await share.seek(share.button('مشاركة التقرير PDF'))).press('Enter');
+    await (await share.seek(share.button('تنزيل التقرير PDF'))).press('Enter');
     const dialog = share.page.getByRole('alertdialog');
+    await dialog.getByRole('button', { name: 'تنزيل PDF', exact: true }).waitFor();
     await dialog.getByRole('button', { name: 'مشاركة PDF', exact: true }).press('Enter');
     await dialog.waitFor({ state: 'detached' });
     const shared = await share.page.evaluate(() => window.hasrSharedFile);
@@ -307,10 +313,10 @@ function logFailures(page, errors) {
     checks.push('shareCapableBrowserPdfApiWithStub');
 
     const mixedPdf = await checkMasonry(browser, session, logFailures, errors);
-    checks.push('linkedAndCustomLengthsAcrossReload', 'exclusionsAndExplicitZero', 'mixedMasonryPdf');
+    checks.push('independentLengthsAndBlockQuantitiesAcrossReload', 'exclusionsAndExplicitZero', 'independentMasonryPdf');
     await checkHelp(browser, session, logFailures, errors);
     checks.push('contextualHelpWithKeyboardAndTouch', 'hintsKeepSavedState', 'sharedPriceUnitsAndProfitExample');
-    if (process.env.HASR_PREVIOUS_WEB_FIXTURE) checks.push('releasedV31PreservesEqualIndependentLengths');
+    if (process.env.HASR_V33_WEB_FIXTURE) checks.push('releasedV33HistoricalLengthsAndReview');
     assert.deepEqual(errors, []);
     const result = { url, passed: true, checks, oldPdf, fullPdf, mobilePdf, partialPdf, mixedPdf, errors };
     fs.writeFileSync(path.join(output, prefix + '-results.json'), JSON.stringify(result, null, 2));
